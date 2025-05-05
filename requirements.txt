@@ -5,6 +5,7 @@ astral
 astropy
 scipy
 ephem
+jplephem
 streamlit
 geopy
 openpyxl

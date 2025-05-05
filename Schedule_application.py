@@ -14,7 +14,8 @@ import streamlit as st
 from geopy.geocoders import Nominatim
 import requests
 import base64
-import os
+import io
+import csv
 
 
 
@@ -261,13 +262,14 @@ def write_schedule(selected_transits, date, city, exposure_time=120, filter='G',
                 'start_time': sunset + datetime.timedelta(minutes=5), 'end_time': dusk}]
 
     for transit in selected_transits:
+        coord = SkyCoord(transit[2], transit[1], unit=(u.hourangle, u.deg))
         obsplan.append({'device_type': 'Camera',
                         'device_name': 'camera_hpp',
                         'action_type': 'object',
                         'action_value': str({'object': transit[0],
                                              'filter': filter,
-                                             'ra': SkyCoord(transit[2], transit[1], unit=(u.hourangle, u.deg)).ra.deg,
-                                             'dec': SkyCoord(transit[2], transit[1], unit=(u.hourangle, u.deg)).dec.deg,
+                                             'ra': coord.ra.deg,
+                                             'dec': coord.dec.deg,
                                              'exptime': exposure_time,
                                              'guiding': True,
                                              'pointing': False,
@@ -297,11 +299,13 @@ def write_schedule(selected_transits, date, city, exposure_time=120, filter='G',
                     'start_time': sunrise + datetime.timedelta(minutes=5),
                     'end_time': sunrise + datetime.timedelta(minutes=65)})
 
-    with open('Schedules\schedule_' + str(date) + '.csv', 'w', newline='') as csvfile:
-        fieldnames = ['device_type', 'device_name', 'action_type', 'action_value', 'start_time', 'end_time']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(obsplan)
+    output = io.StringIO()
+    fieldnames = ['device_type', 'device_name', 'action_type', 'action_value', 'start_time', 'end_time']
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(obsplan)
+
+    return output.getvalue()
 
 
 # --- PAGE CONFIG ---
@@ -520,9 +524,8 @@ with col_right:
         if len(st.session_state['selected_transits']) > 0:
             if st.button("Create Schedule CSV"):
                 try:
-                    os.makedirs("Schedules", exist_ok=True)
                     # Call your function to write schedule
-                    write_schedule(
+                    csv_data = write_schedule(
                         st.session_state['selected_transits'],
                         date,
                         city,
@@ -532,14 +535,14 @@ with col_right:
                     )
                     st.success("Schedule CSV created successfully!")
 
-                    # Optional: Provide download link
-                    with open(f'Schedules/schedule_{date}.csv', 'rb') as f:
-                        st.download_button(
-                            label="Download Schedule CSV",
-                            data=f,
-                            file_name=f'schedule_{date}.csv',
-                            mime='text/csv'
-                        )
+                    
+                    st.download_button(
+                        label="Download Schedule CSV",
+                        data=f,
+                        file_name=f'schedule_{date}.csv',
+                        mime='text/csv'
+                    )
+                        
                 except Exception as e:
                     st.error(f"Error creating schedule: {e}")
         else:

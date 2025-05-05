@@ -538,7 +538,7 @@ with col_right:
                     
                     st.download_button(
                         label="Download Schedule CSV",
-                        data=f,
+                        data=csv_data,
                         file_name=f'schedule_{date}.csv',
                         mime='text/csv'
                     )

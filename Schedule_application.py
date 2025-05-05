@@ -101,6 +101,7 @@ def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit ,moon_dis
         if object.separation(moon_coord).deg < moon_distance:
             return False
 
+        #time += datetime.timedelta(minutes=10)
         time += datetime.timedelta(minutes=15)
 
     return True
@@ -132,6 +133,7 @@ def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_dist
         if object.separation(moon_coord).deg < moon_distance:
             key[0] = 1
             break
+        #obsstart -= datetime.timedelta(minutes=1)
         obsstart -= datetime.timedelta(minutes=5)
 
     obsend = endtime
@@ -157,6 +159,7 @@ def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_dist
         if object.separation(moon_coord).deg < moon_distance:
             key[4] = 1
             break
+        #obsend += datetime.timedelta(minutes=1)
         obsend += datetime.timedelta(minutes=5)
     return max(obsstart, timing1), min(obsend, timing2), key
 

@@ -1,0 +1,9 @@
+numpy
+pandas
+PyAstronomy
+astral
+astropy
+scipy
+ephem
+streamlit
+geopy

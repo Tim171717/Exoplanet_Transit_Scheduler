@@ -519,6 +519,7 @@ with col_right:
         if len(st.session_state['selected_transits']) > 0:
             if st.button("Create Schedule CSV"):
                 try:
+                    os.makedirs("Schedules", exist_ok=True)
                     # Call your function to write schedule
                     write_schedule(
                         st.session_state['selected_transits'],

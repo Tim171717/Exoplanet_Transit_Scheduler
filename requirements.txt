@@ -12,3 +12,5 @@ openpyxl
 astroquery
 IPython
 scipy
+zoneinfo
+timezonefinder

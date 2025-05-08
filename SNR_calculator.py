@@ -7,8 +7,7 @@ from astroquery.simbad import Simbad
 from astroquery.gaia import Gaia
 from astroquery.mast import Catalogs
 from astropy.coordinates import Distance
-
-from mphot import core
+import mphot
 
 
 ### PARAMETERS
@@ -291,7 +290,7 @@ def get_models(
 
     # get instrument data
     for filter_path in filter_paths:
-        name, system_response = core.generate_system_response(instrument_efficiency_path, filter_path)
+        name, system_response = mphot.generate_system_response(instrument_efficiency_path, filter_path)
         response = {
             "name" : name,
             "system_response" : system_response
@@ -332,7 +331,7 @@ def get_models(
 
 
 
-                    precision = core.get_precision(props_i, props_s, Teff, dist, extended=True)
+                    precision = mphot.get_precision(props_i, props_s, Teff, dist, extended=True)
 
                     # mphot may return quantity type
                     for i, el in enumerate(precision):
@@ -356,7 +355,7 @@ def get_models(
 
                     if precision_curve:
                         for i in N_stars:
-                            image_precision_i, binned_precision_i, components_i = core.get_precision(props_i, props_s, Teff, dist, exp_time=exp_time, N_star=i, extended=True)
+                            image_precision_i, binned_precision_i, components_i = mphot.get_precision(props_i, props_s, Teff, dist, exp_time=exp_time, N_star=i, extended=True)
                             
                             # mphot may return quantity type
                             for key in binned_precision_i.keys():

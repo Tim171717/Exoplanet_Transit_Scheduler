@@ -9,3 +9,4 @@ jplephem
 streamlit
 geopy
 openpyxl
+astroquery

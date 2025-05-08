@@ -17,7 +17,7 @@ import base64
 import io
 import csv
 
-
+from SNR_calculator import get_exptime
 
 possible_headers = ['Planet', 'Planet_name', 'name', 'Name',
                     'Declination', 'Dec',
@@ -62,24 +62,25 @@ def BJDtoJD(bjd_tdb, dec, ra, location):
 
 def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy, transittime_unc, period_unc):
     counter = 0
-    while transittime + counter * period < dusk + duration/48 + 1/72:
+    while transittime + counter * period < dusk + duration / 48 + 1 / 72:
         counter += 1
     transittime += counter * period
-    if transittime + duration/48 + 1/72 <= dawn:
-        starttime = max(BJDtoJD(transittime - duration/48 - np.sqrt(counter * period_unc**2 + transittime_unc**2),
-                                dec, ra, city_astropy) - 1/72, dusk)
-        endtime = min(BJDtoJD(transittime + duration/48 + np.sqrt(counter * period_unc**2 + transittime_unc**2),
-                              dec, ra, city_astropy) + 1/72, dawn)
+    if transittime + duration / 48 + 1 / 72 <= dawn:
+        starttime = max(BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
+                                dec, ra, city_astropy) - 1 / 72, dusk)
+        endtime = min(BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
+                              dec, ra, city_astropy) + 1 / 72, dawn)
         transittime = BJDtoJD(transittime, dec, ra, city_astropy)
-        return True, pyasl.daycnv(starttime, mode='dt'), pyasl.daycnv(transittime, mode='dt'), pyasl.daycnv(endtime, mode='dt')
+        return True, pyasl.daycnv(starttime, mode='dt'), pyasl.daycnv(transittime, mode='dt'), pyasl.daycnv(endtime,
+                                                                                                            mode='dt')
     else:
         return False, 1, 1, 1
 
 
-def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit ,moon_distance):
+def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
     # alt_limit = Max's function
     object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
-    #first check at the end
+    # first check at the end
     astropy_time = Time(endtime)
     altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
     object_altaz = object.transform_to(altaz_frame)
@@ -104,7 +105,7 @@ def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit ,moon_dis
             return False
 
         time += datetime.timedelta(minutes=10)
-        #time += datetime.timedelta(minutes=15)
+        # time += datetime.timedelta(minutes=15)
 
     return True
 
@@ -113,11 +114,11 @@ def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_dist
     object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
     key = np.zeros(5)
     obsstart = starttime
-    if dusk > starttime - datetime.timedelta(minutes=add_time-20):
+    if dusk > starttime - datetime.timedelta(minutes=add_time - 20):
         timing1 = dusk
         key[0] = 1
     else:
-        timing1 = starttime - datetime.timedelta(minutes=add_time-20)
+        timing1 = starttime - datetime.timedelta(minutes=add_time - 20)
     while obsstart > timing1:
         astropy_time = Time(obsstart)
 
@@ -136,14 +137,14 @@ def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_dist
             key[0] = 1
             break
         obsstart -= datetime.timedelta(minutes=1)
-        #obsstart -= datetime.timedelta(minutes=5)
+        # obsstart -= datetime.timedelta(minutes=5)
 
     obsend = endtime
-    if dawn < endtime + datetime.timedelta(minutes=add_time-20):
+    if dawn < endtime + datetime.timedelta(minutes=add_time - 20):
         timing2 = dawn
         key[4] = 1
     else:
-        timing2 = endtime + datetime.timedelta(minutes=add_time-20)
+        timing2 = endtime + datetime.timedelta(minutes=add_time - 20)
     while obsend < timing2:
         astropy_time = Time(obsend)
 
@@ -162,7 +163,7 @@ def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_dist
             key[4] = 1
             break
         obsend += datetime.timedelta(minutes=1)
-        #obsend += datetime.timedelta(minutes=5)
+        # obsend += datetime.timedelta(minutes=5)
     return max(obsstart, timing1), min(obsend, timing2), key
 
 
@@ -178,7 +179,8 @@ def otherTargets(starttime1, endtime1, starttime2, endtime2):
     return starttime1 > endtime2 or starttime2 > endtime1
 
 
-def Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df, aperture_size, progress_callback=None):
+def Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df, aperture_size,
+                       progress_callback=None):
     city_astropy = EarthLocation(lat=city.latitude, lon=city.longitude, height=elevation * u.m)
     city_ephem = ephem.Observer()
     city_ephem.pressure = 0;
@@ -221,8 +223,8 @@ def Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df
             if np.isnan(period_unc): period_unc = 0
 
             istransiting, starttime, midtime, endtime = isinTransit(transittime, period, duration, pyasl.jdcnv(dusk),
-                                                           pyasl.jdcnv(dawn), dec, ra, city_astropy,
-                                                           transittime_unc, period_unc)
+                                                                    pyasl.jdcnv(dawn), dec, ra, city_astropy,
+                                                                    transittime_unc, period_unc)
             if istransiting:
                 if Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
                     obsstart, obsend, key = obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit,
@@ -243,7 +245,7 @@ def Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df
     return found_transits
 
 
-def write_schedule(selected_transits, date, city, exposure_time=120, filter='G', bin=4):
+def write_schedule(selected_transits, date, city, max_exp=120, bin=4):
     selected_transits.sort(key=lambda x: x[3])
     city_ephem = ephem.Observer()
     city_ephem.pressure = 0;
@@ -254,15 +256,15 @@ def write_schedule(selected_transits, date, city, exposure_time=120, filter='G',
     dusk, dawn = DuskandDawn(city_ephem, date)
     dusk = min(dusk, selected_transits[0][3])
     dawn = max(dawn, selected_transits[-1][7])
-
+    used_exptimes = []
+    filters = []
     obsplan = [{'device_type': 'Camera', 'device_name': 'camera_hpp', 'action_type': 'open',
-                'action_value': {}, 'start_time': sunset, 'end_time': sunrise},
-               {'device_type': 'Camera', 'device_name': 'camera_hpp', 'action_type': 'flats',
-                'action_value': str({'filter': [filter], 'n': [20], 'bin': bin}),
-                'start_time': sunset + datetime.timedelta(minutes=5), 'end_time': dusk}]
+                'action_value': {}, 'start_time': sunset, 'end_time': sunrise}]
 
     for transit in selected_transits:
         coord = SkyCoord(transit[2], transit[1], unit=(u.hourangle, u.deg))
+        filter, exposure_time = get_exptime(transit[0][:-1], coord, transit[5].strftime('%Y-%m-%d %H:%M:%S'),
+                                            max_exp=max_exp, binning=bin)
         obsplan.append({'device_type': 'Camera',
                         'device_name': 'camera_hpp',
                         'action_type': 'object',
@@ -276,8 +278,18 @@ def write_schedule(selected_transits, date, city, exposure_time=120, filter='G',
                                              'bin': bin}),
                         'start_time': str(transit[3]),
                         'end_time': str(transit[7])})
-    exptimes = (np.unique(np.append(np.linspace(0,120,8, dtype=int), exposure_time))).tolist()
+        used_exptimes.append(exposure_time)
+        filters.append(filter)
+
+    filters = np.unique(filters).tolist()
+    nn = (np.zeros(len(filters), dtype=int) + 20//len(filters)).tolist()
+    obsplan.insert(1, {'device_type': 'Camera', 'device_name': 'camera_hpp', 'action_type': 'flats',
+                'action_value': str({'filter': filters, 'n': nn, 'bin': bin}),
+                'start_time': sunset + datetime.timedelta(minutes=5), 'end_time': dusk})
+
+    exptimes = (np.unique(np.append(np.linspace(0, 120, 8, dtype=int), used_exptimes))).tolist()
     nn = (np.zeros(len(exptimes), dtype=int) + 10).tolist()
+    caltime = np.dot(exptimes, nn) + 0.7 * np.sum(nn)
     obsplan.append({'device_type': 'Camera',
                     'device_name': 'camera_hpp',
                     'action_type': 'flats',
@@ -297,7 +309,7 @@ def write_schedule(selected_transits, date, city, exposure_time=120, filter='G',
                     'action_type': 'calibration',
                     'action_value': str({'exptime': exptimes, 'n': nn, 'bin': bin}),
                     'start_time': sunrise + datetime.timedelta(minutes=5),
-                    'end_time': sunrise + datetime.timedelta(minutes=65)})
+                    'end_time': sunrise + datetime.timedelta(minutes=5, seconds=caltime)})
 
     output = io.StringIO()
     fieldnames = ['device_type', 'device_name', 'action_type', 'action_value', 'start_time', 'end_time']
@@ -334,8 +346,6 @@ with col_left:
 
     if location_query:
         geolocator = Nominatim(user_agent="streamlit-location-search")
-
-
 
     # Additional inputs
     add_time = st.slider('⏳ Additional Observation Time (min)', min_value=20, max_value=60, value=60)
@@ -403,7 +413,8 @@ with col_left:
                     progress_bar.progress(pct)
 
 
-                found_transits = Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df, aperture_size,
+                found_transits = Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df,
+                                                    aperture_size,
                                                     progress_callback=progress_update)
 
                 progress_bar.empty()  # remove progress bar after done
@@ -496,8 +507,8 @@ with col_right:
                     align-items: center;
                 ">
                     <strong>{name}{priority_tag}</strong>
-                    {"<span style='color: #FF6347;'>⚠ Overlaps with selected transit</span>" 
-                    if disabled else "<span style='visibility: hidden;'>.</span>"}
+                    {"<span style='color: #FF6347;'>⚠ Overlaps with selected transit</span>"
+            if disabled else "<span style='visibility: hidden;'>.</span>"}
                 </div>
                     <div style="margin-top: 5px;">
                     <span style="color:{colors[0]};" title="Observation Start">{obsstart.strftime('%H:%M')}</span> &nbsp;–&nbsp;
@@ -510,8 +521,8 @@ with col_right:
             """
             st.markdown(box_content, unsafe_allow_html=True)
 
-        #coordinates display: <br>
-        #Coordinates: Dec {dec}, RA {ra}
+        # coordinates display: <br>
+        # Coordinates: Dec {dec}, RA {ra}
 
         # Step 4: Update selected transits in session state after rendering all
         st.session_state['selected_transits'] = new_selected
@@ -529,20 +540,18 @@ with col_right:
                         st.session_state['selected_transits'],
                         date,
                         city,
-                        exposure_time=120,  # you can add inputs for these if you want
-                        filter='G',
+                        max_exp=120,
                         bin=4
                     )
                     st.success("Schedule CSV created successfully!")
 
-                    
                     st.download_button(
                         label="Download Schedule CSV",
                         data=csv_data,
                         file_name=f'schedule_{date}.csv',
                         mime='text/csv'
                     )
-                        
+
                 except Exception as e:
                     st.error(f"Error creating schedule: {e}")
         else:
@@ -550,7 +559,6 @@ with col_right:
 
     else:
         st.info("No observable transits found for the selected date and location.")
-
 
 
 

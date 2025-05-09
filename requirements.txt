@@ -13,3 +13,4 @@ astroquery
 IPython
 scipy
 timezonefinder
+urllib3

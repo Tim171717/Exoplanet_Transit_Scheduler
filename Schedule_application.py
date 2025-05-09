@@ -406,16 +406,37 @@ with col_left:
     #additional inputs
     with st.expander("Additional Settings"):
         # Add inputs inside the expander
+        display = st.checkbox('Display Transits in UTC', value=False)
+        st.session_state['display'] = display
+        utc = st.checkbox('Write Schedule in UTC', value=True)
+        st.session_state['utc'] = utc
         device_name = st.text_input("Device Name: ", value='camera_hpp')
         st.session_state['device_name'] = device_name
         max_exp = st.number_input("Maximal Exposure Time", value=120, min_value=0, step=10)
         st.session_state['max_exp'] = max_exp
         bin = st.number_input("Binning", value=4, min_value=0, step=1)
         st.session_state['bin'] = bin
-        display = st.checkbox('Display Transits in UTC', value=False)
-        st.session_state['display'] = display
-        utc = st.checkbox('Write Schedule in UTC', value=True)
-        st.session_state['utc'] = utc
+
+        filters = [
+            "Clear (UV to IR)",
+            "Luminance (B to R)",
+            "U (Johnson)",
+            "B (Johnson)",
+            "V (Johnson)",
+            "R (Cousins)",
+            "I (Cousins)",
+            "H (2MASS)",
+            "J (2MASS)",
+            "Ks (2MASS)",
+            "u' (SDSS)",
+            "g' (SDSS)",
+            "r' (SDSS)",
+            "i' (SDSS)",
+            "z' (SDSS)",
+            "Astrodon ExoPlanet-BB (V to IR)"
+        ]
+        default_selection = ['Clear (UV to IR)', "V (Johnson)", "R (Cousins)", "g' (SDSS)"]
+        selected_filters = st.multiselect("Select filters:", filters, default=default_selection)
 
     if st.button("Submit"):
         if location_query:

@@ -69,7 +69,7 @@ with col_left:
         df = pd.read_csv(uploaded_file)
 
     elif catalog_selected == "NASA":
-        uploaded_file = 'NASA_Exoplanet_Archive_database.csv'
+        uploaded_file = 'NASA_Exoplanet_Archive_Database.csv'
         df = pd.read_csv(uploaded_file)
 
     elif catalog_selected == "Custom":

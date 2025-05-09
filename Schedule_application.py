@@ -1,35 +1,13 @@
-import numpy as np
 import pandas as pd
-from PyAstronomy import pyasl
 import datetime
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
 from astral import LocationInfo
-from astral.sun import sun
-import astropy.units as u
-from astropy.time import Time
-from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body, solar_system_ephemeris
-from scipy.optimize import root_scalar
-import ephem
 import streamlit as st
 from geopy.geocoders import Nominatim
 import requests
-import io
-import csv
 
-
-from SNR_calculator import get_exptime
-
-possible_headers = ['Planet', 'Planet_name', 'name', 'Name',
-                    'Declination', 'Dec',
-                    'Right Ascension', 'RA',
-                    'ephemeris mid_time', 'ephemeris mid_time [BJD]', 'epoch',
-                    'ephemeris mid_time uncertainty', 'epoch_uncertainty',
-                    'ephemeris period', 'ephemeris period [days]', 'period',
-                    'ephemeris period uncertainty', 'period_uncertainty',
-                    'duration', 'duration [hours]',
-                    'minimmum size of telescope [inches]', 'minimmum size of telescope'
-                    ]
+from Schedule_maker import Get_availabilities, select_schedule, write_schedule, otherTargets
 
 colormapping = {
     'campaign': 'turquoise',
@@ -40,304 +18,6 @@ colormapping = {
     'low': 'limegreen'
 }
 
-
-def BJDtoJD(bjd_tdb, dec, ra, location):
-    coord = SkyCoord(ra=ra, dec=dec, unit=(u.hourangle, u.deg))
-
-    # Define the function whose root we want to find
-    def f(jd_utc_val):
-        time = Time(jd_utc_val, format='jd', scale='utc', location=location)
-        with solar_system_ephemeris.set('de432s'):
-            ltt_bary = time.light_travel_time(coord)
-        bjd_calc = time.tdb + ltt_bary
-        return bjd_calc.jd - bjd_tdb  # We want this to be zero
-
-    # Initial guess: BJD_TDB is very close to JD_UTC
-    result = root_scalar(f, bracket=[bjd_tdb - 0.01, bjd_tdb + 0.01], method='brentq')
-
-    if not result.converged:
-        raise RuntimeError("Root finding for BJD→JD did not converge.")
-
-    return result.root  # JD in UTC scale
-
-
-def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy, transittime_unc, period_unc):
-    counter = 0
-    while transittime + counter * period < dusk + duration / 48 + 1 / 72:
-        counter += 1
-    transittime += counter * period
-    if transittime + duration / 48 + 1 / 72 <= dawn:
-        starttime = max(BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                                dec, ra, city_astropy) - 1 / 72, dusk)
-        endtime = min(BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                              dec, ra, city_astropy) + 1 / 72, dawn)
-        transittime = BJDtoJD(transittime, dec, ra, city_astropy)
-        return (True,
-                (pyasl.daycnv(starttime, mode='dt')),
-                (pyasl.daycnv(transittime,mode='dt')),
-                (pyasl.daycnv(endtime,mode='dt')))
-    else:
-        return False, 1, 1, 1
-
-
-def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
-    # alt_limit = Max's function
-    object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
-    # first check at the end
-    astropy_time = Time(endtime)
-    altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-    object_altaz = object.transform_to(altaz_frame)
-    if object_altaz.alt.deg < alt_limit:
-        return False
-
-    time = starttime
-    while time < endtime:
-        astropy_time = Time(time)
-
-        # Transform object coordinates to AltAz
-        altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-        object_altaz = object.transform_to(altaz_frame)
-
-        # Check altitude
-        if object_altaz.alt.deg < alt_limit:
-            return False
-
-        # Get Moon position and compute separation
-        moon_coord = get_body('moon', astropy_time, location=city_astropy).transform_to('icrs')
-        if object.separation(moon_coord).deg < moon_distance:
-            return False
-
-        time += datetime.timedelta(minutes=10)
-        # time += datetime.timedelta(minutes=15)
-
-    return True
-
-
-def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, add_time, dusk, dawn):
-    object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
-    key = np.zeros(5)
-    obsstart = starttime
-    if dusk > starttime - datetime.timedelta(minutes=add_time - 20):
-        timing1 = dusk
-        key[0] = 1
-    else:
-        timing1 = starttime - datetime.timedelta(minutes=add_time - 20)
-    while obsstart > timing1:
-        astropy_time = Time(obsstart)
-
-        # Transform object coordinates to AltAz
-        altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-        object_altaz = object.transform_to(altaz_frame)
-
-        # Check altitude
-        if object_altaz.alt.deg < alt_limit:
-            key[0] = 1
-            break
-
-        # Get Moon position and compute separation
-        moon_coord = get_body('moon', astropy_time, location=city_astropy).transform_to('icrs')
-        if object.separation(moon_coord).deg < moon_distance:
-            key[0] = 1
-            break
-        obsstart -= datetime.timedelta(minutes=1)
-        # obsstart -= datetime.timedelta(minutes=5)
-
-    obsend = endtime
-    if dawn < endtime + datetime.timedelta(minutes=add_time - 20):
-        timing2 = dawn
-        key[4] = 1
-    else:
-        timing2 = endtime + datetime.timedelta(minutes=add_time - 20)
-    while obsend < timing2:
-        astropy_time = Time(obsend)
-
-        # Transform object coordinates to AltAz
-        altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-        object_altaz = object.transform_to(altaz_frame)
-
-        # Check altitude
-        if object_altaz.alt.deg < alt_limit:
-            key[4] = 1
-            break
-
-        # Get Moon position and compute separation
-        moon_coord = get_body('moon', astropy_time, location=city_astropy).transform_to('icrs')
-        if object.separation(moon_coord).deg < moon_distance:
-            key[4] = 1
-            break
-        obsend += datetime.timedelta(minutes=1)
-        # obsend += datetime.timedelta(minutes=5)
-    return max(obsstart, timing1), min(obsend, timing2), key
-
-
-def DuskandDawn(city_ephem, date):
-    city_ephem.date = date
-    dusk = city_ephem.next_setting(ephem.Sun()).datetime()
-    city_ephem.date = date + datetime.timedelta(days=1)
-    dawn = city_ephem.next_rising(ephem.Sun()).datetime()
-    return dusk, dawn
-
-
-def otherTargets(starttime1, endtime1, starttime2, endtime2):
-    return starttime1 > endtime2 or starttime2 > endtime1
-
-
-def Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df, aperture_size,
-                       progress_callback=None):
-    city_astropy = EarthLocation(lat=city.latitude, lon=city.longitude, height=elevation * u.m)
-    city_ephem = ephem.Observer()
-    city_ephem.pressure = 0;
-    city_ephem.lat, city_ephem.lon = str(city.latitude), str(city.longitude)
-    if dusk_type == 'Astronomical':
-        city_ephem.horizon = '-18'
-    elif dusk_type == 'Nautical':
-        city_ephem.horizon = '-12'
-    else:
-        city_ephem.horizon = '-6'
-
-    found_transits = []
-
-    headers = []
-    for header in possible_headers:
-        if header in df.columns:
-            headers.append(header)
-    if len(headers) < 8:
-        raise ValueError("Invalid import catalog. Please check the headers.")
-    total_rows = len(df)
-
-    dusk, dawn = DuskandDawn(city_ephem, date)
-    for i, row in df.iterrows():
-        name = row[headers[0]]
-        dec = row[headers[1]]
-        ra = row[headers[2]]
-        transittime = float(row[headers[3]])
-        transittime_unc = float(row[headers[4]])
-        period = float(row[headers[5]])
-        period_unc = float(row[headers[6]])
-        duration = float(row[headers[7]])
-
-        aperture = True
-        if possible_headers[-1] in headers or possible_headers[-2] in headers:
-            aperture_rec = float(row[headers[-1]])
-            aperture = aperture_size >= aperture_rec
-
-        if aperture:
-            if np.isnan(transittime_unc): transittime_unc = 0
-            if np.isnan(period_unc): period_unc = 0
-
-            istransiting, starttime, midtime, endtime = isinTransit(transittime, period, duration, pyasl.jdcnv(dusk),
-                                                                    pyasl.jdcnv(dawn), dec, ra, city_astropy,
-                                                                    transittime_unc, period_unc)
-            if istransiting:
-                if Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
-                    obsstart, obsend, key = obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit,
-                                                         moon_distance, add_time, dusk, dawn)
-                    planet_info = [name,
-                                   dec,
-                                   ra,
-                                   obsstart.replace(tzinfo=datetime.timezone.utc),
-                                   (starttime + datetime.timedelta(minutes=20)).replace(tzinfo=datetime.timezone.utc),
-                                   midtime.replace(tzinfo=datetime.timezone.utc),
-                                   (endtime - datetime.timedelta(minutes=20)).replace(tzinfo=datetime.timezone.utc),
-                                   obsend.replace(tzinfo=datetime.timezone.utc),
-                                   key]
-                    if 'priority' in df.columns:
-                        planet_info.append(row['priority'])
-                    else:
-                        planet_info.append('no priority')
-
-                    found_transits.append(planet_info)
-
-            if progress_callback is not None:
-                progress_callback(int((i + 1) / total_rows * 100))
-
-    found_transits.sort(key=lambda x: x[3])
-    return found_transits
-
-
-def write_schedule(selected_transits, date, city, max_exp=120, bin=4,device_name='camera_hpp',tzone='UTC'):
-    selected_transits.sort(key=lambda x: x[3])
-    city_ephem = ephem.Observer()
-    city_ephem.pressure = 0;
-    city_ephem.lat, city_ephem.lon = str(city.latitude), str(city.longitude)
-    city_ephem.horizon = '-12'
-    sunset = sun(city.observer, date=date)['sunset']
-    sunrise = sun(city.observer, date=date + datetime.timedelta(days=1))['sunrise']
-    dusk, dawn = DuskandDawn(city_ephem, date)
-    dusk = dusk.replace(tzinfo=datetime.timezone.utc)
-    dawn = dawn.replace(tzinfo=datetime.timezone.utc)
-    dusk = min(dusk, selected_transits[0][3])
-    dawn = max(dawn, selected_transits[-1][7])
-    used_exptimes = []
-    filters = []
-    obsplan = [{'device_type': 'Camera', 'device_name': device_name, 'action_type': 'open',
-                'action_value': {}, 'start_time': sunset.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                'end_time': (sunrise.astimezone(ZoneInfo(tzone))).strftime('%Y-%m-%d %H:%M:%S.%f')}]
-
-
-    for transit in selected_transits:
-        coord = SkyCoord(transit[2], transit[1], unit=(u.hourangle, u.deg))
-        filter, exposure_time = get_exptime(transit[0][:-1], coord, transit[5].strftime('%Y-%m-%d %H:%M:%S'),
-                                            max_exp=max_exp, binning=bin)
-        obsplan.append({'device_type': 'Camera',
-                        'device_name': device_name,
-                        'action_type': 'object',
-                        'action_value': str({'object': transit[0],
-                                             'filter': filter,
-                                             'ra': float(coord.ra.deg),
-                                             'dec': float(coord.dec.deg),
-                                             'exptime': float(exposure_time),
-                                             'guiding': True,
-                                             'pointing': False,
-                                             'bin': bin}),
-                        'start_time': transit[3].astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                        'end_time': transit[7].astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')})
-        used_exptimes.append(exposure_time)
-        filters.append(filter)
-
-    filters = np.unique(filters).tolist()
-    nn = (np.zeros(len(filters), dtype=int) + 20//len(filters)).tolist()
-    obsplan.insert(1, {'device_type': 'Camera', 'device_name': device_name, 'action_type': 'flats',
-                       'action_value': str({'filter': filters, 'n': nn, 'bin': bin}),
-                       'start_time': (sunset.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                       'end_time': dusk.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')})
-
-    exptimes = np.linspace(0, max_exp, 8, dtype=int)
-    deleting = []
-    for ue in used_exptimes:
-        deleting.append(np.argmin(abs(exptimes - ue)))
-    exptimes = np.delete(exptimes, np.unique(deleting))
-    exptimes = (np.unique(np.append(exptimes, used_exptimes))).tolist()
-    nn = (np.zeros(len(exptimes), dtype=int) + 10).tolist()
-    caltime = np.dot(exptimes, nn) + 0.7 * np.sum(nn)
-    obsplan.append({'device_type': 'Camera',
-                    'device_name': device_name,
-                    'action_type': 'flats',
-                    'action_value': str({'filter': [filter],
-                                         'n': [20],
-                                         'bin': bin}),
-                    'start_time': dawn.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                    'end_time': sunrise.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')})
-    obsplan.append({'device_type': 'Camera',
-                    'device_name': device_name,
-                    'action_type': 'close',
-                    'action_value': "{}",
-                    'start_time': sunrise.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                    'end_time': (sunrise.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f')})
-    obsplan.append({'device_type': 'Camera',
-                    'device_name': device_name,
-                    'action_type': 'calibration',
-                    'action_value': str({'exptime': exptimes, 'n': nn, 'bin': bin}),
-                    'start_time': (sunrise.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                    'end_time': (sunrise.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5, seconds=caltime)).strftime('%Y-%m-%d %H:%M:%S.%f')})
-
-    output = io.StringIO()
-    fieldnames = ['device_type', 'device_name', 'action_type', 'action_value', 'start_time', 'end_time']
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(obsplan)
-
-    return output.getvalue()
 
 
 # --- PAGE CONFIG ---
@@ -383,11 +63,10 @@ with col_left:
 
     # --- LOAD CATALOG BASED ON SELECTION ---
     df = None
-    uploaded_file = None
 
     if catalog_selected == "ExoClock":
-        uploaded_file = 'ExoplanetCatalog_Exoclock.xlsx'
-        df = pd.read_excel(uploaded_file, engine='openpyxl')
+        uploaded_file = 'ExoClock_Exoplanet_Database.csv'
+        df = pd.read_csv(uploaded_file)
 
     elif catalog_selected == "NASA":
         uploaded_file = 'NASA_Exoplanet_Archive_database.csv'
@@ -436,7 +115,7 @@ with col_left:
             "Astrodon ExoPlanet-BB (V to IR)"
         ]
         default_selection = ['Clear (UV to IR)', "V (Johnson)", "R (Cousins)", "g' (SDSS)"]
-        selected_filters = st.multiselect("Select filters:", filters, default=default_selection)
+        #selected_filters = st.multiselect("Select filters:", filters, default=default_selection)
 
     if st.button("Submit"):
         if location_query:
@@ -478,6 +157,7 @@ with col_left:
             st.error("Please upload a catalog.")
 
         if uploaded_file and city is not None:
+            st.session_state['firsttime'] = True
             with col_right:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -487,9 +167,12 @@ with col_left:
                     progress_bar.progress(pct)
 
 
-                found_transits = Get_availabilities(date, city, elevation, alt_limit, add_time, dusk_type, df,
-                                                    aperture_size,
+                found_transits = Get_availabilities(date, city, elevation, df, alt_limit=alt_limit,
+                                                    moon_distance=moon_distance, add_time=add_time,
+                                                    dusk_type=dusk_type, aperture_size=aperture_size,
                                                     progress_callback=progress_update)
+
+
 
                 progress_bar.empty()  # remove progress bar after done
 
@@ -505,6 +188,11 @@ with col_left:
         st.session_state['found_transits'] = []
 
 with col_right:
+    #reruns after hitting submit to avoid flickering when pressing best selection for the first time
+    if st.session_state.get('firsttime', False):
+        st.session_state['firsttime'] = False
+        st.rerun()
+
     # --- OUTPUT: Show found transits ---
     found_transits = st.session_state['found_transits']
 
@@ -513,7 +201,7 @@ with col_right:
         timezone_str = st.session_state.get('timezone')
         elevation = st.session_state.get('elevation')
 
-        tzinfo = f"🕒 Timezone: **{timezone_str}**"
+        tzinfo = f"🕒 **{timezone_str}**"
         if timezone_str != 'UTC':
             date = datetime.datetime.combine(st.session_state.get('date'), datetime.datetime.min.time())
             date = (date + datetime.timedelta(hours=12)).replace(tzinfo=datetime.timezone.utc)
@@ -528,8 +216,11 @@ with col_right:
 
         location_info = f"**{city.name}/{city.region}, {elevation} m**"
 
-        st.success(f"✅ Found {len(found_transits)} observable transits for {location_info}")
-        st.markdown(tzinfo)
+        st.success(f"✅ Found **{len(found_transits)}** observable transits for {location_info}")
+
+        subcol_left, subcol_right = st.columns([2, 1])
+        with subcol_left:
+            st.markdown(tzinfo)
 
         # Initialize selected_transits if not present
         if 'selected_transits' not in st.session_state:
@@ -539,6 +230,22 @@ with col_right:
         checked_states = []
         for i, t in enumerate(found_transits):
             checked_states.append(st.session_state.get(f"transit_{i}", False))
+
+        with subcol_right:
+            if True not in checked_states:
+                if st.button("💡 Best Selection"):
+                    try:
+                        best_indices = select_schedule(found_transits)
+                        best_transits = [found_transits[i] for i in best_indices]
+
+                        # Update session state
+                        st.session_state['selected_transits'] = best_transits
+                        for i in range(len(found_transits)):
+                            st.session_state[f"transit_{i}"] = i in best_indices
+
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error selecting best transit(s): {e}")
 
         # Step 2: Build new selected list from checked_states
         new_selected = [t for i, t in enumerate(found_transits) if checked_states[i]]
@@ -565,9 +272,9 @@ with col_right:
                 f"Select", key=f"transit_{i}", value=(t in new_selected), disabled=disabled
             )
             if disabled:
-                colors = ['#FFA07A' if i == 1 else '#bbb' for i in key]
+                colors = ['#FFA07A' if i == 0 else '#bbb' for i in key]
             else:
-                colors = ['red' if i == 1 else 'black' for i in key]
+                colors = ['red' if i == 0 else 'black' for i in key]
 
             timezone = st.session_state['timezone']
 
@@ -659,7 +366,8 @@ with col_right:
                 except Exception as e:
                     st.error(f"Error creating schedule: {e}")
         else:
-            st.info("No transits selected to create a schedule.")
+            st.info("No transits selected.")
+
 
     else:
         st.info("No observable transits found for the selected date and location.")

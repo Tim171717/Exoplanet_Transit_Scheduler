@@ -290,6 +290,9 @@ with col_right:
             # Render checkbox with disabled state
             if f"transit_{i}" not in st.session_state:
                 st.session_state["transit_1"] = t in new_selected  # Set initial value
+                
+            if f"airmass_{i}" not in st.session_state:
+                st.session_state[f"airmass_{i}"] = False
 
             subcol_left, subcol_right = st.columns([1.81, 1])
             with subcol_left:

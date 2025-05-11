@@ -221,7 +221,7 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
         depth = float(row[headers[8]])
 
         aperture = True
-        if possible_headers[-1] in headers or possible_headers[-2] in headers:
+        if possible_headers[-1] in headers or possible_headers[-2] in headers or possible_headers[-3] in headers:
             aperture_rec = float(row[headers[-1]])
             aperture = aperture_size >= aperture_rec
 

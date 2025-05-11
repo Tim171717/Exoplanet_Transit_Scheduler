@@ -6,8 +6,10 @@ from astral import LocationInfo
 import streamlit as st
 from geopy.geocoders import Nominatim
 import requests
+import plotly.express as px
 
 from Schedule_maker import Get_availabilities, select_schedule, write_schedule, otherTargets
+from airmass_plotter import plot_airmass_interactive
 
 colormapping = {
     'campaign': 'turquoise',
@@ -69,7 +71,7 @@ with col_left:
         df = pd.read_csv(uploaded_file)
 
     elif catalog_selected == "NASA":
-        uploaded_file = 'NASA_Exoplanet_Archive_Database.csv'
+        uploaded_file = 'NASA_Exoplanet_Archive_database.csv'
         df = pd.read_csv(uploaded_file)
 
     elif catalog_selected == "Custom":
@@ -89,6 +91,8 @@ with col_left:
         st.session_state['display'] = display
         utc = st.checkbox('Write Schedule in UTC', value=True)
         st.session_state['utc'] = utc
+        endearly = st.checkbox('end early (if possible)', value=True)
+        st.session_state['endearly'] = endearly
         device_name = st.text_input("Device Name: ", value='camera_hpp')
         st.session_state['device_name'] = device_name
         max_exp = st.number_input("Maximal Exposure Time", value=120, min_value=0, step=10)
@@ -179,6 +183,19 @@ with col_left:
                 st.session_state['found_transits'] = found_transits
                 st.session_state['selected_transits'] = []  # reset selections
 
+                st.session_state['plots'] = {t[0]: None for t in found_transits}
+                maxdepht = max([t[-1] for t in found_transits])
+                for transit in found_transits:
+                    fig = plot_airmass_interactive(
+                        transit[1], transit[2],
+                        transit[3], transit[7],
+                        city.latitude, city.longitude, elevation,
+                        transit[4], transit[6],
+                        transit[-1], transit[0],
+                        maxdepht=maxdepht
+                    )
+                    st.session_state['plots'][transit[0]] = fig
+
                 # Reset all transit checkboxes to False
                 for i in range(len(found_transits)):
                     st.session_state[f"transit_{i}"] = False
@@ -188,15 +205,17 @@ with col_left:
         st.session_state['found_transits'] = []
 
 with col_right:
-    #reruns after hitting submit to avoid flickering when pressing best selection for the first time
-    if st.session_state.get('firsttime', False):
-        st.session_state['firsttime'] = False
-        st.rerun()
 
     # --- OUTPUT: Show found transits ---
     found_transits = st.session_state['found_transits']
 
     if found_transits:
+        # reruns after hitting submit to avoid flickering when pressing best selection for the first time and setting the plots up
+        if st.session_state.get('firsttime', False):
+            st.session_state['firsttime'] = False
+            st.rerun()
+
+
         city = st.session_state.get('city')
         timezone_str = st.session_state.get('timezone')
         elevation = st.session_state.get('elevation')
@@ -235,7 +254,8 @@ with col_right:
             if True not in checked_states:
                 if st.button("💡 Best Selection"):
                     try:
-                        best_indices = select_schedule(found_transits)
+                        key2 = [int((t[4]-t[3]+t[7]-t[6]).total_seconds()) for t in found_transits]
+                        best_indices = select_schedule(found_transits, key2)
                         best_transits = [found_transits[i] for i in best_indices]
 
                         # Update session state
@@ -252,7 +272,7 @@ with col_right:
 
         # Step 3: Render transits with compatibility check and disabling incompatible ones
         for i, t in enumerate(found_transits):
-            name, dec, ra, obsstart, start, mid, end, obsend, key, priority = t
+            name, dec, ra, obsstart, start, mid, end, obsend, key, priority = t[:-1]
 
             # Check if this transit overlaps with any *other* selected transit
             is_compatible = True
@@ -268,9 +288,20 @@ with col_right:
             disabled = (not is_compatible) and (t not in new_selected)
 
             # Render checkbox with disabled state
-            checked = st.checkbox(
-                f"Select", key=f"transit_{i}", value=(t in new_selected), disabled=disabled
-            )
+            if f"transit_{i}" not in st.session_state:
+                st.session_state["transit_1"] = t in new_selected  # Set initial value
+
+            subcol_left, subcol_right = st.columns([1.81, 1])
+            with subcol_left:
+                checked = st.checkbox(
+                    f"Select", key=f"transit_{i}", disabled=disabled
+                )
+
+            with subcol_right:
+                airmass_show = st.checkbox(
+                    f"Show Airmass Plot", key=f"airmass_{i}", value=False
+                )
+
             if disabled:
                 colors = ['#FFA07A' if i == 0 else '#bbb' for i in key]
             else:
@@ -314,15 +345,24 @@ with col_right:
             if disabled else "<span style='visibility: hidden;'>.</span>"}
                 </div>
                     <div style="margin-top: 5px;">
-                    <span style="color:{colors[0]};" title="Observation Start">{obsstart.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
-                    <span style="color:{colors[1]};" title="Transit Start">{start.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
-                    <span style="color:{colors[2]};" title="Transit Mid-Time">{mid.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
-                    <span style="color:{colors[3]};" title="Transit End">{end.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
-                    <span style="color:{colors[4]};" title="Observation End">{obsend.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span>
+                    <span style="color:{colors[0]};" title="Observation Start">
+                    {obsstart.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
+                    <span style="color:{colors[1]};" title="Transit Start">
+                    {start.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
+                    <span style="color:{colors[2]};" title="Transit Mid-Time">
+                    {mid.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
+                    <span style="color:{colors[3]};" title="Transit End">
+                    {end.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span> &nbsp;–&nbsp;
+                    <span style="color:{colors[4]};" title="Observation End">
+                    {obsend.astimezone(ZoneInfo(timezone)).strftime('%H:%M')}</span>
                 </div>
             </div>
             """
             st.markdown(box_content, unsafe_allow_html=True)
+
+            if st.session_state.get(f"airmass_{i}", False):
+                fig = st.session_state['plots'][name]
+                st.plotly_chart(fig, use_container_width=True)
 
 
         # Step 4: Update selected transits in session state after rendering all
@@ -336,6 +376,7 @@ with col_right:
         bin = st.session_state.get('bin', None)
         device_name = st.session_state.get('device_name', None)
         utc = st.session_state.get('utc', None)
+        endearly = st.session_state.get('endearly', None)
         if utc: timezone = 'UTC'
         else:
             tf = TimezoneFinder()
@@ -352,7 +393,8 @@ with col_right:
                         max_exp=max_exp,
                         bin=bin,
                         device_name=device_name,
-                        tzone=timezone
+                        tzone=timezone,
+                        endearly=endearly
                     )
                     st.success("Schedule CSV created successfully!")
 

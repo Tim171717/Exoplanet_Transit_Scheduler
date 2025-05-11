@@ -14,6 +14,7 @@ import ephem
 from zoneinfo import ZoneInfo
 import json
 import urllib.request
+import streamlit as st
 
 from SNR_calculator import get_exptime
 
@@ -28,6 +29,7 @@ possible_headers = ['Planet', 'Planet_name', 'name', 'Name',
                     'period_days', 'ephemeris period', 'ephemeris period [days]', 'period',
                     'period_unc', 'ephemeris period uncertainty', 'period_uncertainty',
                     'duration_hours', 'duration', 'duration [hours]',
+                    'depth_r_mmag', 'depth',
                     'min_telescope_inches', 'minimmum size of telescope [inches]', 'minimmum size of telescope'
                     ]
 
@@ -82,8 +84,7 @@ def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy
         return False, 1, 1, 1
 
 
-def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
-    # alt_limit = Max's function
+def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, steps=1000):
     object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
     # first check at the end
     astropy_time = Time(endtime)
@@ -203,7 +204,7 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
     for header in possible_headers:
         if header in df.columns:
             headers.append(header)
-    if len(headers) < 8:
+    if len(headers) < 9:
         raise ValueError("Invalid import catalog. Please check the headers.")
     total_rows = len(df)
 
@@ -217,6 +218,7 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
         period = float(row[headers[5]])
         period_unc = float(row[headers[6]])
         duration = float(row[headers[7]])
+        depth = float(row[headers[8]])
 
         aperture = True
         if possible_headers[-1] in headers or possible_headers[-2] in headers:
@@ -247,7 +249,7 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
                         planet_info.append(row['priority'])
                     else:
                         planet_info.append('no priority')
-
+                    planet_info.append(depth)
                     found_transits.append(planet_info)
 
             if progress_callback is not None:
@@ -257,29 +259,21 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
     return found_transits
 
 
-def select_schedule(possible_transits):
+def select_schedule(possible_transits, key2):
     n = len(possible_transits)
-    infos = np.zeros((n, 4))
+    infos = np.zeros((n, 5))
     names = []
     for i in range(n):
         infos[i,0] = priority(possible_transits[i][9])
         infos[i,1] = pyasl.jdcnv(possible_transits[i][3])
         infos[i,2] = pyasl.jdcnv(possible_transits[i][7])
-        infos[i,3] = min(possible_transits[i][8])
+        infos[i,3] = key2[i]
+        infos[i,4] = possible_transits[i][10]
         names.append(possible_transits[i][0])
 
     prio = np.where(infos[:, 0] == np.min(infos[:, 0]), 1, 0)
     if np.sum(prio) == 1:
         selection = np.argmax(prio)
-        otherobs = []
-        for i in range(n):
-            if otherTargets(infos[selection, 1], infos[selection, 2], infos[i, 1], infos[i, 2]):
-                otherobs.append(possible_transits[i])
-        selection = [selection]
-        if len(otherobs) >= 1:
-            addition = select_schedule(otherobs)
-            for add in addition:
-                selection.append(names.index(otherobs[add][0]))
     else:
         multipleobs = np.zeros(n)
         for i in range(n):
@@ -290,37 +284,36 @@ def select_schedule(possible_transits):
         multipleobs = np.where(multipleobs == np.max(multipleobs), 1, 0)
         if sum(multipleobs) == 1:
             selection = np.argmax(multipleobs)
-            otherobs = []
-            for i in range(n):
-                if otherTargets(infos[selection, 1], infos[selection, 2], infos[i, 1], infos[i, 2]):
-                    otherobs.append(possible_transits[i])
-            selection = [selection]
-            if len(otherobs) >= 1:
-                addition = select_schedule(otherobs)
-                for add in addition:
-                    selection.append(names.index(otherobs[add][0]))
         else:
-            key = np.zeros(n)
-            for i in range(n):
-                key[i] = infos[i, 3]
-            key = key * multipleobs
-            key = np.where(key == np.max(key), 1, 0)
-            selection = np.argmax(key)
-            otherobs = []
-            for i in range(n):
-                if otherTargets(infos[selection, 1], infos[selection, 2], infos[i, 1], infos[i, 2]):
-                    otherobs.append(possible_transits[i])
-            selection = [selection]
-            if len(otherobs) >= 1:
-                addition = select_schedule(otherobs)
-                for add in addition:
-                    selection.append(names.index(otherobs[add][0]))
+            infos[:, 3] = infos[:, 3] * multipleobs * prio
+            key = np.where(infos[:, 3] == np.max(infos[:, 3]), 1, 0)
+            if sum(key) == 1:
+                selection = np.argmax(key)
+            else:
+                ppt = infos[:,4] * key * multipleobs * prio
+                ppt = np.where(ppt == np.max(ppt), 1, 0)
+                if sum(ppt) == 1:
+                    selection = np.argmax(ppt)
+                else:
+                    end = np.where(key == max(key), infos[:,2], max(infos[:,2])+1)
+                    selection = np.argmin(end)
+    otherobs = []
+    otherkey = []
+    for i in range(n):
+        if otherTargets(infos[selection, 1], infos[selection, 2], infos[i, 1], infos[i, 2]):
+            otherobs.append(possible_transits[i])
+            otherkey.append(key2[i])
+    selection = [selection]
+    if len(otherobs) >= 1:
+        addition = select_schedule(otherobs, otherkey)
+        for add in addition:
+            selection.append(names.index(otherobs[add][0]))
 
     return sorted(selection)
 
 
 
-def write_schedule(selected_transits, date, city, max_exp=120, bin=4,device_name='camera_hpp',tzone='UTC'):
+def write_schedule(selected_transits, date, city, max_exp=120, bin=4, device_name='camera_hpp', tzone='UTC', endearly=True):
     selected_transits.sort(key=lambda x: x[3])
     city_ephem = ephem.Observer()
     city_ephem.pressure = 0
@@ -366,14 +359,20 @@ def write_schedule(selected_transits, date, city, max_exp=120, bin=4,device_name
                        'action_value': str({'filter': filters, 'n': nnf, 'bin': bin}),
                        'start_time': (sunset.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f'),
                        'end_time': dusk.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')})
-    obsplan.append({'device_type': 'Camera',
-                    'device_name': device_name,
-                    'action_type': 'flats',
-                    'action_value': str({'filter': filters,
-                                         'n': nnf,
-                                         'bin': bin}),
-                    'start_time': dawn.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                    'end_time': sunrise.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')})
+
+    if endearly and (sunrise - selected_transits[-1][7]).total_seconds() > 3600:
+        ending =  selected_transits[-1][7]
+        obsplan[0]['end_time'] = ending.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')
+    else:
+        ending = sunrise
+        obsplan.append({'device_type': 'Camera',
+                        'device_name': device_name,
+                        'action_type': 'flats',
+                        'action_value': str({'filter': filters,
+                                             'n': nnf,
+                                             'bin': bin}),
+                        'start_time': dawn.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
+                        'end_time': sunrise.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f')})
 
     exptimes = np.linspace(0, max_exp, 8, dtype=int)
     deleting = []
@@ -387,14 +386,15 @@ def write_schedule(selected_transits, date, city, max_exp=120, bin=4,device_name
                     'device_name': device_name,
                     'action_type': 'close',
                     'action_value': "{}",
-                    'start_time': sunrise.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                    'end_time': (sunrise.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f')})
+                    'start_time': ending.astimezone(ZoneInfo(tzone)).strftime('%Y-%m-%d %H:%M:%S.%f'),
+                    'end_time': (ending.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f')})
+
     obsplan.append({'device_type': 'Camera',
                     'device_name': device_name,
                     'action_type': 'calibration',
                     'action_value': str({'exptime': exptimes, 'n': nn, 'bin': bin}),
-                    'start_time': (sunrise.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f'),
-                    'end_time': (sunrise.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5, seconds=caltime)).strftime('%Y-%m-%d %H:%M:%S.%f')})
+                    'start_time': (ending.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S.%f'),
+                    'end_time': (ending.astimezone(ZoneInfo(tzone)) + datetime.timedelta(minutes=5, seconds=caltime)).strftime('%Y-%m-%d %H:%M:%S.%f')})
 
     output = io.StringIO()
     fieldnames = ['device_type', 'device_name', 'action_type', 'action_value', 'start_time', 'end_time']
@@ -412,11 +412,13 @@ def update_ExoClockCatalog():
     exoclock_planets = json.loads(response.read())
 
     # Define output CSV file and fieldnames
-    output_file = 'ExoplanetCatalog_Exoclock.csv'
+    output_file = 'ExoClock_Exoplanet_Database.csv'
     fieldnames = [
         'name', 'priority', 'dec_j2000', 'ra_j2000', 'v_mag',
         't0_bjd_tdb', 't0_unc', 'period_days', 'period_unc',
-        'min_telescope_inches', 'duration_hours'
+        'min_telescope_inches', 'depth_r_mmag', 'duration_hours',
+        'rp_over_rs', 'sma_over_rs', 'inclination', 'eccentricity',
+        'periastron'
     ]
 
     # Write to CSV
@@ -436,8 +438,13 @@ def update_ExoClockCatalog():
                 'period_days': planet['period_days'],
                 'period_unc': planet['period_unc'],
                 'min_telescope_inches': planet['min_telescope_inches'],
-                #'depth_mmag': planet['depth_mmag'],
+                'depth_r_mmag': planet['depth_r_mmag'] / 1.0863,
                 'duration_hours': planet['duration_hours'],
+                'rp_over_rs': planet['rp_over_rs'],
+                'sma_over_rs': planet['sma_over_rs'],
+                'inclination': planet['inclination'],
+                'eccentricity': planet['eccentricity'],
+                'periastron': planet['periastron']
             })
 
     print(f"Catalog saved to {output_file}")
@@ -458,3 +465,4 @@ if __name__ == '__main__':
     csvname = 'Schedules/schedule_' + date.strftime('%Y-%m-%d') + '.csv'
     with open(csvname, "w", newline='', encoding='utf-8') as f:
         f.write(csv_string)
+    # update_ExoClockCatalog()

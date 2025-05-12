@@ -9,7 +9,7 @@ import requests
 import plotly.express as px
 
 from Schedule_maker import Get_availabilities, select_schedule, write_schedule, otherTargets
-from airmass_plotter import plot_airmass_interactive
+from airmass_plotter import plot_airmass_interactive, UTCtoTimeZone
 
 colormapping = {
     'campaign': 'turquoise',
@@ -82,11 +82,8 @@ with col_left:
             elif uploaded_file.name.endswith('.xlsx'):
                 df = pd.read_excel(uploaded_file, engine='openpyxl')
 
-    # Submit button and trigger calculation + store results in session state
-
     #additional inputs
     with st.expander("Additional Settings"):
-        # Add inputs inside the expander
         display = st.checkbox('Display Transits in UTC', value=False)
         st.session_state['display'] = display
         utc = st.checkbox('Write Schedule in UTC', value=True)
@@ -185,16 +182,20 @@ with col_left:
 
                 st.session_state['plots'] = {t[0]: None for t in found_transits}
                 maxdepht = max([t[-1] for t in found_transits])
-                for transit in found_transits:
-                    fig = plot_airmass_interactive(
-                        transit[1], transit[2],
-                        transit[3], transit[7],
-                        city.latitude, city.longitude, elevation,
-                        transit[4], transit[6],
-                        transit[-1], transit[0],
-                        maxdepht=maxdepht
-                    )
-                    st.session_state['plots'][transit[0]] = fig
+
+                with st.spinner("Rendering Airmass..."):
+                    for transit in found_transits:
+                        fig = plot_airmass_interactive(
+                            transit[1], transit[2],
+                            transit[3], transit[7],
+                            city.latitude, city.longitude, elevation,
+                            transit[4], transit[6],
+                            transit[-1], transit[0],
+                            maxdepht=maxdepht,
+                            timezone=timezone,
+                            alt_limit=alt_limit,
+                        )
+                        st.session_state['plots'][transit[0]] = fig
 
                 # Reset all transit checkboxes to False
                 for i in range(len(found_transits)):
@@ -217,20 +218,14 @@ with col_right:
 
 
         city = st.session_state.get('city')
-        timezone_str = st.session_state.get('timezone')
+        timezone = st.session_state.get('timezone')
         elevation = st.session_state.get('elevation')
 
-        tzinfo = f"🕒 **{timezone_str}**"
-        if timezone_str != 'UTC':
+        tzinfo = f"🕒 **{timezone}**"
+        if timezone != 'UTC':
             date = datetime.datetime.combine(st.session_state.get('date'), datetime.datetime.min.time())
             date = (date + datetime.timedelta(hours=12)).replace(tzinfo=datetime.timezone.utc)
-            tz = ZoneInfo(timezone_str)
-            now = date.astimezone(tz)
-            offset_sec = tz.utcoffset(now).total_seconds()
-            hours = int(offset_sec // 3600)
-            minutes = int((abs(offset_sec) % 3600) // 60)
-            sign = "+" if offset_sec >= 0 else "-"
-            utc_offset = f"UTC{sign}{abs(hours):02d}:{minutes:02d}"
+            utc_offset = UTCtoTimeZone(timezone, date)
             tzinfo += f" **({utc_offset})**"
 
         location_info = f"**{city.name}/{city.region}, {elevation} m**"
@@ -290,7 +285,7 @@ with col_right:
             # Render checkbox with disabled state
             if f"transit_{i}" not in st.session_state:
                 st.session_state["transit_1"] = t in new_selected  # Set initial value
-                
+
             if f"airmass_{i}" not in st.session_state:
                 st.session_state[f"airmass_{i}"] = False
 

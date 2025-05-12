@@ -71,106 +71,115 @@ def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy
         counter += 1
     transittime += counter * period
     if transittime + duration / 48 + 1 / 72 <= dawn:
-        starttime = max(BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                                dec, ra, city_astropy) - 1 / 72, dusk)
-        endtime = min(BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                              dec, ra, city_astropy) + 1 / 72, dawn)
+        starttime = BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
+                            dec, ra, city_astropy) - 1 / 72
+        endtime = BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
+                          dec, ra, city_astropy) + 1 / 72
         transittime = BJDtoJD(transittime, dec, ra, city_astropy)
-        return (True,
-                (pyasl.daycnv(starttime, mode='dt')),
-                (pyasl.daycnv(transittime,mode='dt')),
-                (pyasl.daycnv(endtime,mode='dt')))
+        if starttime > dusk and endtime < dawn:
+            return (True,
+                    (pyasl.daycnv(starttime, mode='dt')),
+                    (pyasl.daycnv(transittime,mode='dt')),
+                    (pyasl.daycnv(endtime,mode='dt')))
+
+    return False, 1, 1, 1
+
+
+def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, dt = datetime.timedelta(minutes=1)):
+    target = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
+
+    starttime = starttime.replace(second=0, microsecond=0)
+    endtime = endtime.replace(second=0, microsecond=0)
+    datetimes = [starttime, endtime]
+    times = Time(datetimes)
+    altaz_frame = AltAz(obstime=times, location=city_astropy)
+    target_altaz = target.transform_to(altaz_frame)
+    if min(target_altaz.alt.deg) >= alt_limit:
+        datetimes = []
+        current = starttime + dt
+        while current <= endtime - dt:
+            datetimes.append(current)
+            current += dt
+        times = Time(datetimes)
+
+        altaz_frame = AltAz(obstime=times, location=city_astropy)
+        target_altaz = target.transform_to(altaz_frame)
+        altitudes = target_altaz.alt.deg
+
+        moon_coord = get_body('moon', times, location=city_astropy).transform_to('icrs')
+        moon_separations = target.separation(moon_coord).deg
+
+        return min(moon_separations) >= moon_distance and min(altitudes) >= alt_limit
+
+    else: return False
+
+
+def cab(array, point):
+    arr = np.array(array)
+    garr = arr[arr > point]
+
+    if len(garr) > 0:
+        closest_value = garr[np.argmin(garr - 60)]
+        return np.where(arr == closest_value)[0][0]
     else:
-        return False, 1, 1, 1
+        return 0
 
+def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, add_time, dusk, dawn,
+                    dt = datetime.timedelta(seconds=30)):
+    target = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
+    key = np.array([0,1,1,1,0])
+    starting = max(dusk, starttime - datetime.timedelta(minutes=add_time - 20))
+    ending = min(dawn, endtime + datetime.timedelta(minutes=add_time - 20))
 
-def Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, steps=1000):
-    object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
-    # first check at the end
-    astropy_time = Time(endtime)
-    altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-    object_altaz = object.transform_to(altaz_frame)
-    if object_altaz.alt.deg < alt_limit:
-        return False
+    #calculating the starttime:
+    datetimes = []
+    current = starting
+    while current < starttime:
+        datetimes.append(current)
+        current += dt
+    times = Time(datetimes)
 
-    time = starttime
-    while time < endtime:
-        astropy_time = Time(time)
+    altaz_frame = AltAz(obstime=times, location=city_astropy)
+    target_altaz = target.transform_to(altaz_frame)
+    altitudes = target_altaz.alt.deg
 
-        # Transform object coordinates to AltAz
-        altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-        object_altaz = object.transform_to(altaz_frame)
+    moon_coord = get_body('moon', times, location=city_astropy).transform_to('icrs')
+    moon_separations = target.separation(moon_coord).deg
+    if min(moon_separations) < moon_distance and min(altitudes) < alt_limit:
+        starting = datetimes[max(cab(moon_separations, moon_distance),
+                             cab(altitudes, alt_limit))]
+    elif min(moon_separations) < moon_distance:
+        starting = datetimes[cab(moon_separations, moon_distance)]
+    elif min(altitudes) < alt_limit:
+        starting = datetimes[cab(altitudes, alt_limit)]
+    else: key[0] = 1
+    key[0] *= dusk <= starttime - datetime.timedelta(minutes=add_time - 20)
 
-        # Check altitude
-        if object_altaz.alt.deg < alt_limit:
-            return False
+    #calculating the endtime:
+    datetimes = []
+    current = endtime
+    while current < ending:
+        datetimes.append(current)
+        current += dt
+    times = Time(datetimes)
 
-        # Get Moon position and compute separation
-        moon_coord = get_body('moon', astropy_time, location=city_astropy).transform_to('icrs')
-        if object.separation(moon_coord).deg < moon_distance:
-            return False
+    altaz_frame = AltAz(obstime=times, location=city_astropy)
+    target_altaz = target.transform_to(altaz_frame)
+    altitudes = target_altaz.alt.deg
 
-        time += datetime.timedelta(minutes=10)
-        # time += datetime.timedelta(minutes=15)
+    moon_coord = get_body('moon', times, location=city_astropy).transform_to('icrs')
+    moon_separations = target.separation(moon_coord).deg
+    if min(moon_separations) < moon_distance and min(altitudes) < alt_limit:
+        ending = datetimes[max(cab(moon_separations, moon_distance),
+                             cab(altitudes, alt_limit))]
+    elif min(moon_separations) < moon_distance:
+        ending = datetimes[cab(moon_separations, moon_distance)]
+    elif min(altitudes) < alt_limit:
+        ending = datetimes[cab(altitudes, alt_limit)]
+    else: key[4] = 1
+    key[4] *= dawn >= endtime + datetime.timedelta(minutes=add_time - 20)
 
-    return True
-
-
-def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, add_time, dusk, dawn):
-    object = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
-    key = np.zeros(5) + 1
-    obsstart = starttime
-    if dusk > starttime - datetime.timedelta(minutes=add_time - 20):
-        timing1 = dusk
-        key[0] = 0
-    else:
-        timing1 = starttime - datetime.timedelta(minutes=add_time - 20)
-    while obsstart > timing1:
-        astropy_time = Time(obsstart)
-
-        # Transform object coordinates to AltAz
-        altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-        object_altaz = object.transform_to(altaz_frame)
-
-        # Check altitude
-        if object_altaz.alt.deg < alt_limit:
-            key[0] = 0
-            break
-
-        # Get Moon position and compute separation
-        moon_coord = get_body('moon', astropy_time, location=city_astropy).transform_to('icrs')
-        if object.separation(moon_coord).deg < moon_distance:
-            key[0] = 0
-            break
-        obsstart -= datetime.timedelta(minutes=1)
-        # obsstart -= datetime.timedelta(minutes=5)
-
-    obsend = endtime
-    if dawn < endtime + datetime.timedelta(minutes=add_time - 20):
-        timing2 = dawn
-        key[4] = 0
-    else:
-        timing2 = endtime + datetime.timedelta(minutes=add_time - 20)
-    while obsend < timing2:
-        astropy_time = Time(obsend)
-
-        # Transform object coordinates to AltAz
-        altaz_frame = AltAz(obstime=astropy_time, location=city_astropy)
-        object_altaz = object.transform_to(altaz_frame)
-
-        # Check altitude
-        if object_altaz.alt.deg < alt_limit:
-            key[4] = 0
-            break
-
-        # Get Moon position and compute separation
-        moon_coord = get_body('moon', astropy_time, location=city_astropy).transform_to('icrs')
-        if object.separation(moon_coord).deg < moon_distance:
-            key[4] = 0
-            break
-        obsend += datetime.timedelta(minutes=1)
-        # obsend += datetime.timedelta(minutes=5)
-    return max(obsstart, timing1), min(obsend, timing2), key
+    return starting, ending, key
 
 
 def DuskandDawn(city_ephem, date):

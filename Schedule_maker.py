@@ -125,7 +125,7 @@ def cab(array, point):
         return 0
 
 def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, add_time, dusk, dawn,
-                    dt = datetime.timedelta(seconds=30)):
+                    dt = datetime.timedelta(seconds=60)):
     target = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
     key = np.array([0,1,1,1,0])
     starting = max(dusk, starttime - datetime.timedelta(minutes=add_time - 20))

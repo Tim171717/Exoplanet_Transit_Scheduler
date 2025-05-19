@@ -455,10 +455,10 @@ with tab2:
 
     col1, col2 = st.columns(2)
     with col1:
-        alt_limit = st.number_input("**Altitude Limit & Min Moon Distance**", min_value=0.0, max_value=90.0, value=20.0, step=1.0)
+        alt_limit = st.number_input("**📐 Altitude Limit / 🌙 Moon Distance**", min_value=0.0, max_value=90.0, value=20.0, step=1.0)
         moon_distance = st.number_input("Min Moon", min_value=0.0, max_value=90.0, value=30.0, step=1.0,label_visibility='collapsed')
     with col2:
-        aperturemode = st.radio('**Aperture**', ['inch', 'mm'], horizontal=True)
+        aperturemode = st.radio('**📏  Aperture**', ['inch', 'mm'], horizontal=True)
         if aperturemode == 'mm':
             aperture_size = st.number_input("..", min_value=0, max_value=3500, value=500,
                                             label_visibility='collapsed') / 25.4
@@ -474,7 +474,7 @@ with tab2:
         'low'
     ]
     default_sel = ['campaign', 'ttvs', 'alert', 'high', 'medium']
-    selected_priorities = st.multiselect("Select Priorities:", priorities, default=default_sel)
+    selected_priorities = st.multiselect("**⭐ Select Priorities**", priorities, default=default_sel)
 
     if st.button("Create Timeline"):
         if location_query:

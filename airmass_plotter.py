@@ -1,7 +1,8 @@
 import numpy as np
 import datetime
-from astropy.coordinates import EarthLocation, AltAz, SkyCoord, get_sun
-from astropy.time import Time, TimeDelta
+from astropy.coordinates import EarthLocation, AltAz, SkyCoord, get_sun, get_body
+from astropy.time import Time
+from astroplan import moon_illumination
 from zoneinfo import ZoneInfo
 import astropy.units as u
 import plotly.graph_objects as go
@@ -18,6 +19,33 @@ def UTCtoTimeZone(timezone, date):
     minutes = int((abs(offset_sec) % 3600) // 60)
     sign = "+" if offset_sec >= 0 else "-"
     return f"UTC{sign}{abs(hours):02d}:{minutes:02d}"
+
+
+def get_moon(start, end, city_astropy):
+    if start.minute != 0 or start.second != 0 or start.microsecond != 0:
+        start = (start.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1))
+    end = end.replace(minute=0, second=0, microsecond=0)
+
+    dt_list = []
+    current = start
+    while current <= end:
+        dt_list.append(current)
+        current += datetime.timedelta(hours=1)
+    time_list = Time(dt_list)
+
+    moon_coord = get_body('moon', time_list, location=city_astropy).transform_to('icrs')
+    altaz_frame = AltAz(obstime=time_list, location=city_astropy)
+    moon_altaz = moon_coord.transform_to(altaz_frame)
+    moon_alts = moon_altaz.alt.deg
+    illums = moon_illumination(time_list)
+
+    moon = []
+    for time, moon_alt, illum in zip(dt_list, moon_alts, illums):
+        if moon_alt > 0:
+            moon.append([time, moon_alt, illum])
+
+    return moon
+
 
 def sky_color_from_solar_altitude(alt):
     """
@@ -74,15 +102,21 @@ def plot_airmass_interactive(
     sun_alts = sun_altaz.alt.deg
     sky_colors = [sky_color_from_solar_altitude(alt) for alt in sun_alts]
 
+    #get moon altitudes
+    moon_data = get_moon(start_time_utc, end_time_utc, location)
+    times = [entry[0].astimezone(ZoneInfo(timezone)) for entry in moon_data]
+    altitudes = [entry[1] for entry in moon_data]
+    illuminations = [entry[2] * 100 for entry in moon_data]
+
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     fig.update_layout(
-                       plot_bgcolor='rgb(15, 17, 23)',
-                        paper_bgcolor='black',
-                       )
+        paper_bgcolor='black',
+        plot_bgcolor='rgb(15, 17, 23)',
+    )
 
-    y_base = 0
-    y_transit = transit_depth
+    y_base = 90
+    y_transit = 90 - transit_depth / maxdepht / 1.2 * 90
     fig.add_trace(go.Scatter(
         x=[start_time_utc.astimezone(ZoneInfo(timezone)),
            transit_start.astimezone(ZoneInfo(timezone)),
@@ -94,8 +128,39 @@ def plot_airmass_interactive(
         fill='toself',
         fillcolor='rgba(128,128,128,0.3)',
         line=dict(color='gray', dash='dash'),
-        name='Transit'
+        name='Transit',
+        hoveron='fills',
+        hoverinfo='text',
+        text=(
+            f"<b>Transit Window</b><br>"
+            f"Start: {transit_start.astimezone(ZoneInfo(timezone)).strftime('%H:%M:%S')}<br>"
+            f"End: {transit_end.astimezone(ZoneInfo(timezone)).strftime('%H:%M:%S')}<br>"
+            f"Depth: {transit_depth:.2f} ppt"
+        ),
     ), secondary_y=True)
+
+    fig.add_trace(
+        go.Scatter(
+            x=times,
+            y=altitudes,
+            mode='markers',
+            name='Moon Info',
+            marker=dict(symbol=116, size=12, color='royalblue'),
+            text=[f"{t.strftime('%H:%M')}<br>Moon Alt: {alt:.1f}°<br>Illum: {illum:.1f}%"
+                  for t, alt, illum in zip(times, altitudes, illuminations)],
+            hovertemplate='%{text}',
+            showlegend=True
+        ),
+        secondary_y=True
+    )
+    fig.update_yaxes(
+        showgrid=False,
+        range=[0,91],
+        title_text="Moon Altitude [deg]",
+        secondary_y=True,
+        showline=True,
+        ticks="outside"
+    )
 
     datetimes = [t.astimezone(ZoneInfo(timezone)) for t in datetimes]
     # Airmass curve
@@ -117,14 +182,6 @@ def plot_airmass_interactive(
     low_limit = 1 / np.sin(np.deg2rad(alt_limit))
     fig.update_yaxes(title_text="Airmass", range=[low_limit,1], secondary_y=False)
 
-    fig.update_yaxes(
-        showgrid=False,
-        range=[maxdepht*1.2,-0.05],
-        title_text="Transit Depht (ppt)",
-        secondary_y=True,
-        showline=True,
-        ticks="outside"
-    )
     if timezone == 'UTC':
         utc_offset = '(UTC)'
     else:

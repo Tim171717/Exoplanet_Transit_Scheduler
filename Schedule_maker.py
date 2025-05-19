@@ -65,16 +65,16 @@ def BJDtoJD(bjd_tdb, dec, ra, location):
     return result.root  # JD in UTC scale
 
 
-def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy, transittime_unc, period_unc):
+def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy, transittime_unc, period_unc, adding=20):
     counter = 0
-    while transittime + counter * period < dusk + duration / 48 + 1 / 72:
+    while transittime + counter * period < dusk + duration / 48 + adding / 60 / 24:
         counter += 1
     transittime += counter * period
-    if transittime + duration / 48 + 1 / 72 <= dawn:
+    if transittime + duration / 48 + adding / 60 / 24 <= dawn:
         starttime = BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                            dec, ra, city_astropy) - 1 / 72
+                            dec, ra, city_astropy) - adding / 60 / 24
         endtime = BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                          dec, ra, city_astropy) + 1 / 72
+                          dec, ra, city_astropy) + adding / 60 / 24
         transittime = BJDtoJD(transittime, dec, ra, city_astropy)
         if starttime > dusk and endtime < dawn:
             return (True,
@@ -125,11 +125,11 @@ def cab(array, point):
         return 0
 
 def obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance, add_time, dusk, dawn,
-                    dt = datetime.timedelta(seconds=60)):
+                    dt = datetime.timedelta(seconds=60), adding=20):
     target = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
     key = np.array([0,1,1,1,0])
-    starting = max(dusk, starttime - datetime.timedelta(minutes=add_time - 20))
-    ending = min(dawn, endtime + datetime.timedelta(minutes=add_time - 20))
+    starting = max(dusk, starttime - datetime.timedelta(minutes=add_time - adding))
+    ending = min(dawn, endtime + datetime.timedelta(minutes=add_time - adding))
 
     #calculating the starttime:
     datetimes = []
@@ -194,8 +194,17 @@ def otherTargets(starttime1, endtime1, starttime2, endtime2):
     return starttime1 > endtime2 or starttime2 > endtime1
 
 
-def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30, add_time=60,
-                       dusk_type='Nautical', aperture_size=20, progress_callback=None):
+def Get_availabilities(date,
+                       city,
+                       elevation,
+                       df,
+                       alt_limit=30,
+                       moon_distance=30,
+                       add_time=60,
+                       dusk_type='Nautical',
+                       aperture_size=20,
+                       add_perc=False,
+                       progress_callback=None):
     city_astropy = EarthLocation(lat=city.latitude, lon=city.longitude, height=elevation * u.m)
     city_ephem = ephem.Observer()
     city_ephem.pressure = 0
@@ -216,6 +225,7 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
     if len(headers) < 9:
         raise ValueError("Invalid import catalog. Please check the headers.")
     total_rows = len(df)
+    n = 1
 
     dusk, dawn = DuskandDawn(city_ephem, date)
     for i, row in df.iterrows():
@@ -235,23 +245,30 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
             aperture = aperture_size >= aperture_rec
 
         if aperture:
+            if add_perc:
+                additional_time = round(add_time * duration * 60 / 100, 0)
+                adding = min(additional_time, 20)
+            else:
+                additional_time = add_time
+                adding = 20
+
             if np.isnan(transittime_unc): transittime_unc = 0
             if np.isnan(period_unc): period_unc = 0
 
             istransiting, starttime, midtime, endtime = isinTransit(transittime, period, duration, pyasl.jdcnv(dusk),
                                                                     pyasl.jdcnv(dawn), dec, ra, city_astropy,
-                                                                    transittime_unc, period_unc)
+                                                                    transittime_unc, period_unc, adding)
             if istransiting:
                 if Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
                     obsstart, obsend, key = obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit,
-                                                         moon_distance, add_time, dusk, dawn)
+                                                         moon_distance, additional_time, dusk, dawn, adding=adding)
                     planet_info = [name,
                                    dec,
                                    ra,
                                    obsstart.replace(tzinfo=datetime.timezone.utc),
-                                   (starttime + datetime.timedelta(minutes=20)).replace(tzinfo=datetime.timezone.utc),
+                                   (starttime + datetime.timedelta(minutes=adding)).replace(tzinfo=datetime.timezone.utc),
                                    midtime.replace(tzinfo=datetime.timezone.utc),
-                                   (endtime - datetime.timedelta(minutes=20)).replace(tzinfo=datetime.timezone.utc),
+                                   (endtime - datetime.timedelta(minutes=adding)).replace(tzinfo=datetime.timezone.utc),
                                    obsend.replace(tzinfo=datetime.timezone.utc),
                                    key]
                     if 'priority' in df.columns:
@@ -262,7 +279,8 @@ def Get_availabilities(date, city, elevation, df, alt_limit=30, moon_distance=30
                     found_transits.append(planet_info)
 
             if progress_callback is not None:
-                progress_callback(int((i + 1) / total_rows * 100))
+                progress_callback(int((n) / total_rows * 100))
+            n += 1
 
     found_transits.sort(key=lambda x: x[3])
     return found_transits

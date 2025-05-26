@@ -6,8 +6,7 @@ from astral import LocationInfo
 import streamlit as st
 from geopy.geocoders import Nominatim
 import requests
-import plotly.express as px
-import plotly.io as pio
+import time
 
 from Schedule_maker import Get_availabilities, select_schedule, write_schedule, otherTargets
 from airmass_plotter import plot_airmass_interactive, UTCtoTimeZone
@@ -140,6 +139,9 @@ with tab1:
 
         if st.button("Submit"):
             if location_query:
+                if time.time() - st.session_state.get('lastcall', 0) <= 1:
+                    time.sleep(1)
+                st.session_state['lastcall'] = time.time()
                 geolocator = Nominatim(user_agent="streamlit-location-search")
                 try:
                     location = geolocator.geocode(location_query)
@@ -438,15 +440,15 @@ with tab2:
         startdate = st.date_input("**📅 Select Startdate**", value=datetime.date.today())
         st.session_state['startdate'] = startdate
     with col2:
-        enddate = st.date_input("**📅 Select Enddate**", value=datetime.date.today() + datetime.timedelta(days=30),
+        enddate = st.date_input("**📅 Select Enddate**", value=startdate + datetime.timedelta(days=30),
                                 min_value=startdate)
         st.session_state['enddate'] = enddate
 
     col1, col2 = st.columns(2)
     with col1:
-        location_query = st.text_input("**📍 Location selection**", value='ETH Hönggerberg')
+        location_query = st.text_input("**📍  Location Selection**", value='ETH Hönggerberg')
     with col2:
-        dusk_type = st.selectbox("**🌅 Dusk Type**", options=["Civil", "Nautical", "Astronomical"])
+        dusk_type = st.selectbox("**🌅  Dusk Type**", options=["Civil", "Nautical", "Astronomical"])
 
     location = None
     city = None

@@ -194,11 +194,15 @@ def make_timeline(
 
         # Unique legend items
     for label, color in colormapping.items():
+        if label == 'ttvs':
+            label = 'TTVs'
+        else:
+            label = label.capitalize()
         fig.add_trace(go.Scatter(
             x=[None], y=[None],
             mode='markers',
             marker=dict(size=10, color=color),
-            name=label.capitalize(),
+            name=label,
             showlegend=True
         ))
 

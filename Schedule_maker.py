@@ -65,22 +65,27 @@ def BJDtoJD(bjd_tdb, dec, ra, location):
     return result.root  # JD in UTC scale
 
 
-def isinTransit(transittime, period, duration, dusk, dawn, dec, ra, city_astropy, transittime_unc, period_unc, adding=20):
-    counter = 0
-    while transittime + counter * period < dusk + duration / 48 + adding / 60 / 24:
-        counter += 1
-    transittime += counter * period
-    if transittime + duration / 48 + adding / 60 / 24 <= dawn:
-        starttime = BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                            dec, ra, city_astropy) - adding / 60 / 24
-        endtime = BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2),
-                          dec, ra, city_astropy) + adding / 60 / 24
+def get_transittimes(periods, transittimes, t_start):
+    n_periods = np.floor((t_start - transittimes) / periods)
+    transittimes += (n_periods + 1) * periods
+    return transittimes, n_periods + 1
+
+def isinTransit(transittime, counter, duration, dusk, dawn, dec, ra, city_astropy, transittime_unc, period_unc, adding=20):
+    # transittime = BJDtoJD(transittime, dec, ra, city_astropy)
+    # starttime = transittime - duration / 48 - np.sqrt(
+    #     counter * period_unc ** 2 + transittime_unc ** 2) - adding / 60 / 24
+    # endtime = transittime + duration / 48 + np.sqrt(counter * period_unc ** 2 + transittime_unc ** 2) + adding / 60 / 24
+
+    starttime = BJDtoJD(transittime - duration / 48 - np.sqrt(counter * period_unc**2 + transittime_unc**2),
+                        dec, ra, city_astropy) - adding / 60 / 24
+    endtime = BJDtoJD(transittime + duration / 48 + np.sqrt(counter * period_unc**2 + transittime_unc**2),
+                      dec, ra, city_astropy) + adding / 60 / 24
+    if starttime > dusk and endtime < dawn:
         transittime = BJDtoJD(transittime, dec, ra, city_astropy)
-        if starttime > dusk and endtime < dawn:
-            return (True,
-                    (pyasl.daycnv(starttime, mode='dt')),
-                    (pyasl.daycnv(transittime,mode='dt')),
-                    (pyasl.daycnv(endtime,mode='dt')))
+        return (True,
+                (pyasl.daycnv(starttime, mode='dt')),
+                (pyasl.daycnv(transittime,mode='dt')),
+                (pyasl.daycnv(endtime,mode='dt')))
 
     return False, 1, 1, 1
 
@@ -194,17 +199,19 @@ def otherTargets(starttime1, endtime1, starttime2, endtime2):
     return starttime1 > endtime2 or starttime2 > endtime1
 
 
-def Get_availabilities(date,
-                       city,
-                       elevation,
-                       df,
-                       alt_limit=30,
-                       moon_distance=30,
-                       add_time=60,
-                       dusk_type='Nautical',
-                       aperture_size=20,
-                       add_perc=False,
-                       progress_callback=None):
+def Get_availabilities(
+        date,
+        city,
+        elevation,
+        df,
+        alt_limit=30,
+        moon_distance=30,
+        add_perc=False,
+        add_time=60,
+        dusk_type='Nautical',
+        aperture_size=20,
+        progress_callback=None
+):
     city_astropy = EarthLocation(lat=city.latitude, lon=city.longitude, height=elevation * u.m)
     city_ephem = ephem.Observer()
     city_ephem.pressure = 0
@@ -225,16 +232,19 @@ def Get_availabilities(date,
     if len(headers) < 9:
         raise ValueError("Invalid import catalog. Please check the headers.")
     total_rows = len(df)
-    n = 1
 
     dusk, dawn = DuskandDawn(city_ephem, date)
-    for i, row in df.iterrows():
+    periods = np.array(df[headers[5]])
+    t_0s = np.array(df[headers[3]])
+    transittimes, n_periods = get_transittimes(periods, t_0s, pyasl.jdcnv(dusk))
+
+    n = 0
+    for _, row in df.iterrows():
         name = row[headers[0]]
         dec = row[headers[1]]
         ra = row[headers[2]]
-        transittime = float(row[headers[3]])
+        transittime = transittimes[n]
         transittime_unc = float(row[headers[4]])
-        period = float(row[headers[5]])
         period_unc = float(row[headers[6]])
         duration = float(row[headers[7]])
         depth = float(row[headers[8]])
@@ -255,32 +265,36 @@ def Get_availabilities(date,
             if np.isnan(transittime_unc): transittime_unc = 0
             if np.isnan(period_unc): period_unc = 0
 
-            istransiting, starttime, midtime, endtime = isinTransit(transittime, period, duration, pyasl.jdcnv(dusk),
-                                                                    pyasl.jdcnv(dawn), dec, ra, city_astropy,
-                                                                    transittime_unc, period_unc, adding)
-            if istransiting:
-                if Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
-                    obsstart, obsend, key = obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit,
-                                                         moon_distance, additional_time, dusk, dawn, adding=adding)
-                    planet_info = [name,
-                                   dec,
-                                   ra,
-                                   obsstart.replace(tzinfo=datetime.timezone.utc),
-                                   (starttime + datetime.timedelta(minutes=adding)).replace(tzinfo=datetime.timezone.utc),
-                                   midtime.replace(tzinfo=datetime.timezone.utc),
-                                   (endtime - datetime.timedelta(minutes=adding)).replace(tzinfo=datetime.timezone.utc),
-                                   obsend.replace(tzinfo=datetime.timezone.utc),
-                                   key]
-                    if 'priority' in df.columns:
-                        planet_info.append(row['priority'])
-                    else:
-                        planet_info.append('no priority')
-                    planet_info.append(depth)
-                    found_transits.append(planet_info)
+            dusk_jd = pyasl.jdcnv(dusk)
+            dawn_jd = pyasl.jdcnv(dawn)
+            if (transittime >= dusk_jd + duration / 48 + adding / 60 / 24 and
+                    transittime + duration / 48 + adding / 60 / 24 <= dawn_jd + 8 / 60 / 24):
+                istransiting, starttime, midtime, endtime = isinTransit(transittime, n_periods[n], duration, dusk_jd,
+                                                                        dawn_jd, dec, ra, city_astropy, transittime_unc,
+                                                                        period_unc, adding)
+                if istransiting:
+                    if Starisvisible(dec, ra, city_astropy, starttime, endtime, alt_limit, moon_distance):
+                        obsstart, obsend, key = obs_startend(dec, ra, city_astropy, starttime, endtime, alt_limit,
+                                                             moon_distance, additional_time, dusk, dawn, adding=adding)
+                        planet_info = [name,
+                                       dec,
+                                       ra,
+                                       obsstart.replace(tzinfo=datetime.timezone.utc),
+                                       (starttime + datetime.timedelta(minutes=adding)).replace(tzinfo=datetime.timezone.utc),
+                                       midtime.replace(tzinfo=datetime.timezone.utc),
+                                       (endtime - datetime.timedelta(minutes=adding)).replace(tzinfo=datetime.timezone.utc),
+                                       obsend.replace(tzinfo=datetime.timezone.utc),
+                                       key]
+                        if 'priority' in df.columns:
+                            planet_info.append(row['priority'])
+                        else:
+                            planet_info.append('no priority')
+                        planet_info.append(depth)
+                        found_transits.append(planet_info)
 
-            if progress_callback is not None:
-                progress_callback(int((n) / total_rows * 100))
-            n += 1
+                if progress_callback is not None:
+                    progress_callback(int((n+1) / total_rows * 100))
+        n += 1
 
     found_transits.sort(key=lambda x: x[3])
     return found_transits
@@ -481,15 +495,16 @@ if __name__ == '__main__':
     date = datetime.datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
     # date = datetime.datetime(2025,4,6)
     city = LocationInfo("Zurich", "Switzerland", "UTC", 47.2, 8.3)
-    df = pd.read_excel('ExoplanetCatalog_Exoclock.xlsx')
+    df = pd.read_csv('ExoClock_Exoplanet_Database.csv')
 
     found_transits = Get_availabilities(date, city, 575, df)
-
-    best_indices = select_schedule(found_transits)
+    key2 = [int((t[4] - t[3] + t[7] - t[6]).total_seconds()) for t in found_transits]
+    best_indices = select_schedule(found_transits, key2)
     best_transits = [found_transits[i] for i in best_indices]
 
     csv_string = write_schedule(best_transits, date, city)
     csvname = 'Schedules/schedule_' + date.strftime('%Y-%m-%d') + '.csv'
     with open(csvname, "w", newline='', encoding='utf-8') as f:
         f.write(csv_string)
+
     # update_ExoClockCatalog()

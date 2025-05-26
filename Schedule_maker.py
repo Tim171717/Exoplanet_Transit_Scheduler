@@ -198,6 +198,16 @@ def DuskandDawn(city_ephem, date):
 def otherTargets(starttime1, endtime1, starttime2, endtime2):
     return starttime1 > endtime2 or starttime2 > endtime1
 
+def multi_obs(infos, start, end):
+    maxobs = 0
+    for j in range(len(infos)):
+        if otherTargets(start, end, infos[j, 1], infos[j, 2]):
+            cur_start = min(start, infos[j, 1])
+            cur_end = max(end, infos[j, 2])
+            currentobs = 1 + multi_obs(infos, cur_start, cur_end)
+            if currentobs > maxobs:
+                maxobs = currentobs
+    return maxobs
 
 def Get_availabilities(
         date,
@@ -318,9 +328,8 @@ def select_schedule(possible_transits, key2):
     else:
         multipleobs = np.zeros(n)
         for i in range(n):
-            for j in range(n):
-                if otherTargets(infos[i, 1], infos[i, 2], infos[j, 1], infos[j, 2]):
-                    multipleobs[i] += 1
+            multipleobs[i] = multi_obs(infos, infos[i, 1], infos[i, 2])
+
         multipleobs = multipleobs * prio
         multipleobs = np.where(multipleobs == np.max(multipleobs), 1, 0)
         if sum(multipleobs) == 1:

@@ -108,6 +108,7 @@ with tab1:
             endearly = st.checkbox('end early (if possible)', value=True)
             st.session_state['endearly'] = endearly
             alt_limit = st.number_input("Altitude Limit (°)", min_value=0.0, max_value=90.0, value=30.0, step=1.0)
+            st.session_state['alt_limit'] = alt_limit
             moon_distance = st.number_input("Min Moon Distance (°)", min_value=0.0, max_value=180.0, value=30.0, step=1.0)
             device_name = st.text_input("Device Name: ", value='camera_hpp')
             st.session_state['device_name'] = device_name
@@ -203,21 +204,7 @@ with tab1:
 
                     if found_transits:
                         st.session_state['plots'] = {t[0]: None for t in found_transits}
-                        maxdepht = max([t[-1] for t in found_transits])
-
-                        with st.spinner("Rendering Airmass..."):
-                            for transit in found_transits:
-                                fig = plot_airmass_interactive(
-                                    transit[1], transit[2],
-                                    transit[3], transit[7],
-                                    city.latitude, city.longitude, elevation,
-                                    transit[4], transit[6],
-                                    transit[-1], transit[0],
-                                    maxdepht=maxdepht,
-                                    timezone=timezone,
-                                    alt_limit=alt_limit,
-                                )
-                                st.session_state['plots'][transit[0]] = fig
+                        st.session_state['maxdepht'] = max([t[-1] for t in found_transits])
 
                         # Reset all transit checkboxes to False
                         for i in range(len(found_transits)):
@@ -380,8 +367,27 @@ with tab1:
                 """
                 st.markdown(box_content, unsafe_allow_html=True)
 
+
                 if st.session_state.get(f"airmass_{i}", False):
-                    fig = st.session_state['plots'][name]
+                    if st.session_state['plots'][name] is None:
+                        maxdepht = st.session_state['maxdepht']
+                        city = st.session_state['city']
+                        elevation = st.session_state['elevation']
+                        timezone = st.session_state['timezone']
+                        alt_limit = st.session_state['alt_limit']
+                        fig = plot_airmass_interactive(
+                            dec, ra,
+                            obsstart, obsend,
+                            city.latitude, city.longitude, elevation,
+                            start, end,
+                            t[-1], name,
+                            maxdepht=maxdepht,
+                            timezone=timezone,
+                            alt_limit=alt_limit,
+                        )
+                        st.session_state['plots'][name] = fig
+                    else:
+                        fig = st.session_state['plots'][name]
                     st.plotly_chart(fig, use_container_width=True)
 
 

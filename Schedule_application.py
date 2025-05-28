@@ -255,21 +255,20 @@ with tab1:
                 checked_states.append(st.session_state.get(f"transit_{i}", False))
 
             with subcol_right:
-                if True not in checked_states:
-                    if st.button("💡 Best Selection"):
-                        try:
-                            key2 = [int((t[4]-t[3]+t[7]-t[6]).total_seconds()) for t in found_transits]
-                            best_indices = select_schedule(found_transits, key2)
-                            best_transits = [found_transits[i] for i in best_indices]
+                if st.button("💡 Best Selection"):
+                    try:
+                        key2 = [int((t[4]-t[3]+t[7]-t[6]).total_seconds()) for t in found_transits]
+                        best_indices = select_schedule(found_transits, key2)
+                        best_transits = [found_transits[i] for i in best_indices]
 
-                            # Update session state
-                            st.session_state['selected_transits'] = best_transits
-                            for i in range(len(found_transits)):
-                                st.session_state[f"transit_{i}"] = i in best_indices
+                        # Update session state
+                        st.session_state['selected_transits'] = best_transits
+                        for i in range(len(found_transits)):
+                            st.session_state[f"transit_{i}"] = i in best_indices
 
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error selecting best transit(s): {e}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error selecting best transit(s): {e}")
 
             # Step 2: Build new selected list from checked_states
             new_selected = [t for i, t in enumerate(found_transits) if checked_states[i]]

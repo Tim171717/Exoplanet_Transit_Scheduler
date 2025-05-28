@@ -255,7 +255,7 @@ with tab1:
                 checked_states.append(st.session_state.get(f"transit_{i}", False))
 
             with subcol_right:
-                if True is not in [st.session_state[f"transit_{i}" for i in range(len(found_transits))]]:
+                if True not in [st.session_state[f"transit_{i}" for i in range(len(found_transits))]]:
                     if st.button("💡 Best Selection"):
                         try:
                             key2 = [int((t[4]-t[3]+t[7]-t[6]).total_seconds()) for t in found_transits]

@@ -62,7 +62,7 @@ with tab1:
         #aperture
         aperturemode = st.radio('**📏 Aperture**', ['inch', 'mm'], horizontal=True)
         if aperturemode == 'mm':
-            aperture_size = st.number_input(".", min_value=0, max_value=3500, value=500, label_visibility='collapsed') / 25.4
+            aperture_size = st.number_input(".", min_value=0, max_value=3500, value=508, label_visibility='collapsed') / 25.4
         else:
             aperture_size = st.number_input('.', min_value=0, max_value=150, value=20, label_visibility='collapsed')
 

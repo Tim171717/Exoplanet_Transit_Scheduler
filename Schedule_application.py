@@ -275,6 +275,7 @@ with tab1:
                         st.session_state['selected_transits'] = []
                         for i in range(len(found_transits)):
                             st.session_state[f"transit_{i}"] = False
+                        st.rerun()
 
             # Step 2: Build new selected list from checked_states
             new_selected = [t for i, t in enumerate(found_transits) if checked_states[i]]

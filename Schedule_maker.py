@@ -329,7 +329,6 @@ def select_schedule(possible_transits, key2):
         multipleobs = np.zeros(n)
         for i in range(n):
             multipleobs[i] = multi_obs(infos, infos[i, 1], infos[i, 2])
-
         multipleobs = multipleobs * prio
         multipleobs = np.where(multipleobs == np.max(multipleobs), 1, 0)
         if sum(multipleobs) == 1:

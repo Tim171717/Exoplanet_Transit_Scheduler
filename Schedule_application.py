@@ -21,7 +21,14 @@ colormapping = {
     'low': 'limegreen'
 }
 
-
+priority_info = {
+    'campaign': 'CAMPAIGN: Planet included in one of the current observing campaings',
+    'ttvs': 'TTVs: Planet exhibiting strong Trasit Time Variations due to another planet or orbital decay',
+    'alert': 'ALERT: Observations in the last 2 years show an O-C greater than 10 minutes',
+    'high': 'HIGH: Prediction uncertainty greater than the target or less than 3 epochs observed in the last 2 years',
+    'medium': 'MEDIUM: Less than 3 epochs observed in the last year',
+    'low': 'LOW: Else'
+}
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Transit Scheduler", layout="centered")
@@ -53,19 +60,19 @@ with tab1:
         # additional time input
         addmode = st.radio('**⏳ Additional Observation Time (min)**', ['fixed time', '% of transit'], horizontal=True)
         if addmode == '% of transit':
-            add_time = st.slider('.' ,min_value=20, max_value=100, value=50, label_visibility='collapsed')
+            add_time = st.slider('.', min_value=20, max_value=100, value=50, label_visibility='collapsed')
             add_percent = True
         else:
             add_time = st.slider('.', min_value=20, max_value=60, value=60, label_visibility='collapsed')
             add_percent = False
 
-        #aperture
-        aperturemode = st.radio('**📏 Aperture**', ['inch', 'mm'], horizontal=True)
+        # aperture
+        aperturemode = st.radio('**📏 Aperture**', ['mm', 'inch'], horizontal=True)
         if aperturemode == 'mm':
-            aperture_size = st.number_input(".", min_value=0, max_value=3500, value=508, label_visibility='collapsed') / 25.4
+            aperture_size = st.number_input(".", min_value=0, max_value=3500, value=508,
+                                            label_visibility='collapsed') / 25.4
         else:
             aperture_size = st.number_input('.', min_value=0, max_value=150, value=20, label_visibility='collapsed')
-
 
         # dusk selection
         dusk_type = st.selectbox("**🌅 Dusk Type**", options=["Astronomical", "Nautical", "Civil"])
@@ -99,7 +106,7 @@ with tab1:
                 elif uploaded_file.name.endswith('.xlsx'):
                     df = pd.read_excel(uploaded_file, engine='openpyxl')
 
-        #additional inputs
+        # additional inputs
         with st.expander("Additional Settings"):
             display = st.checkbox('Display Transits in UTC', value=False)
             st.session_state['display'] = display
@@ -109,7 +116,8 @@ with tab1:
             st.session_state['endearly'] = endearly
             alt_limit = st.number_input("Altitude Limit (°)", min_value=0.0, max_value=90.0, value=30.0, step=1.0)
             st.session_state['alt_limit'] = alt_limit
-            moon_distance = st.number_input("Min Moon Distance (°)", min_value=0.0, max_value=180.0, value=30.0, step=1.0)
+            moon_distance = st.number_input("Min Moon Distance (°)", min_value=0.0, max_value=180.0, value=30.0,
+                                            step=1.0)
             device_name = st.text_input("Device Name: ", value='camera_hpp')
             st.session_state['device_name'] = device_name
             max_exp = st.number_input("Maximal Exposure Time", value=120, min_value=0, step=10)
@@ -136,7 +144,7 @@ with tab1:
                 "Astrodon ExoPlanet-BB (V to IR)"
             ]
             default_selection = ['Clear (UV to IR)', "V (Johnson)", "R (Cousins)", "g' (SDSS)"]
-            #selected_filters = st.multiselect("Select filters:", filters, default=default_selection)
+            # selected_filters = st.multiselect("Select filters:", filters, default=default_selection)
 
         if st.button("Submit"):
             if location_query:
@@ -169,7 +177,8 @@ with tab1:
                     if display is False:
                         tf = TimezoneFinder()
                         timezone = tf.timezone_at(lat=location.latitude, lng=location.longitude)
-                    else: timezone = 'UTC'
+                    else:
+                        timezone = 'UTC'
                     st.session_state['city'] = city
                     st.session_state['elevation'] = elevation
                     st.session_state['timezone'] = timezone
@@ -196,7 +205,6 @@ with tab1:
                                                         dusk_type=dusk_type, aperture_size=aperture_size,
                                                         add_perc=add_percent, progress_callback=progress_update)
 
-
                     progress_bar.empty()  # remove progress bar after done
 
                     st.session_state['found_transits'] = found_transits
@@ -205,6 +213,7 @@ with tab1:
                     if found_transits:
                         st.session_state['plots'] = {t[0]: None for t in found_transits}
                         st.session_state['maxdepht'] = max([t[-1] for t in found_transits])
+                        st.session_state['airmass_show'] = [False for t in found_transits]
 
                         # Reset all transit checkboxes to False
                         for i in range(len(found_transits)):
@@ -224,7 +233,6 @@ with tab1:
             if st.session_state.get('firsttime', False):
                 st.session_state['firsttime'] = False
                 st.rerun()
-
 
             city = st.session_state.get('city')
             timezone = st.session_state.get('timezone')
@@ -258,20 +266,20 @@ with tab1:
                 if True not in [st.session_state[f"transit_{i}"] for i in range(len(found_transits))]:
                     if st.button("💡 Best Selection"):
                         try:
-                            key2 = [int((t[4]-t[3]+t[7]-t[6]).total_seconds()) for t in found_transits]
+                            key2 = [int((t[4] - t[3] + t[7] - t[6]).total_seconds()) for t in found_transits]
                             best_indices = select_schedule(found_transits, key2)
                             best_transits = [found_transits[i] for i in best_indices]
-    
+
                             # Update session state
                             st.session_state['selected_transits'] = best_transits
                             for i in range(len(found_transits)):
                                 st.session_state[f"transit_{i}"] = i in best_indices
-    
+
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error selecting best transit(s): {e}")
                 else:
-                    if st.button("Deselect All"):
+                    if st.button("❌ Deselect All"):
                         st.session_state['selected_transits'] = []
                         for i in range(len(found_transits)):
                             st.session_state[f"transit_{i}"] = False
@@ -298,12 +306,6 @@ with tab1:
                 disabled = (not is_compatible) and (t not in new_selected)
 
                 # Render checkbox with disabled state
-                if f"transit_{i}" not in st.session_state:
-                    st.session_state["transit_1"] = t in new_selected  # Set initial value
-
-                if f"airmass_{i}" not in st.session_state:
-                    st.session_state[f"airmass_{i}"] = False
-
                 subcol_left, subcol_right = st.columns([1.81, 1])
                 with subcol_left:
                     checked = st.checkbox(
@@ -312,9 +314,9 @@ with tab1:
 
                 with subcol_right:
                     airmass_show = st.checkbox(
-                        f"Show Airmass Plot", key=f"airmass_{i}", value=False
+                        f"Show Airmass Plot", key=f"airmass_{i}", value=st.session_state['airmass_show'][i]
                     )
-
+                st.session_state['airmass_show'][i] = airmass_show
                 if disabled:
                     colors = ['#FFA07A' if i == 0 else '#bbb' for i in key]
                 else:
@@ -326,7 +328,7 @@ with tab1:
                 if priority.lower() != "no priority":
                     priority_color = colormapping.get(priority.lower(), "#cccccc")
                     priority_tag = (
-                        f"<span style='"
+                        f"<span title='{priority_info[priority]}' style='"
                         f"background-color: {priority_color}; "
                         f"color: white; "
                         f"padding: 2px 6px; "
@@ -373,7 +375,6 @@ with tab1:
                 """
                 st.markdown(box_content, unsafe_allow_html=True)
 
-
                 if st.session_state.get(f"airmass_{i}", False):
                     if st.session_state['plots'][name] is None:
                         maxdepht = st.session_state['maxdepht']
@@ -381,6 +382,18 @@ with tab1:
                         elevation = st.session_state['elevation']
                         timezone = st.session_state['timezone']
                         alt_limit = st.session_state['alt_limit']
+                        print(
+                            (
+                                dec, ra,
+                                obsstart, obsend,
+                                city.latitude, city.longitude, elevation,
+                                start, end,
+                                t[-1], name,
+                                maxdepht,
+                                timezone,
+                                alt_limit,
+                            )
+                        )
                         fig = plot_airmass_interactive(
                             dec, ra,
                             obsstart, obsend,
@@ -396,7 +409,6 @@ with tab1:
                         fig = st.session_state['plots'][name]
                     st.plotly_chart(fig, use_container_width=True)
 
-
             # Step 4: Update selected transits in session state after rendering all
             st.session_state['selected_transits'] = new_selected
 
@@ -409,7 +421,8 @@ with tab1:
             device_name = st.session_state.get('device_name', None)
             utc = st.session_state.get('utc', None)
             endearly = st.session_state.get('endearly', None)
-            if utc: timezone = 'UTC'
+            if utc:
+                timezone = 'UTC'
             else:
                 tf = TimezoneFinder()
                 timezone = tf.timezone_at(lat=city.latitude, lng=city.longitude)
@@ -469,10 +482,12 @@ with tab2:
 
     col1, col2 = st.columns(2)
     with col1:
-        alt_limit = st.number_input("**📐 Altitude Limit / 🌙 Moon Distance**", min_value=0.0, max_value=90.0, value=20.0, step=1.0)
-        moon_distance = st.number_input("Min Moon", min_value=0.0, max_value=90.0, value=30.0, step=1.0,label_visibility='collapsed')
+        alt_limit = st.number_input("**📐 Altitude Limit / 🌙 Moon Distance**", min_value=0.0, max_value=90.0, value=20.0,
+                                    step=1.0)
+        moon_distance = st.number_input("Min Moon", min_value=0.0, max_value=90.0, value=30.0, step=1.0,
+                                        label_visibility='collapsed')
     with col2:
-        aperturemode = st.radio('**📏  Aperture**', ['inch', 'mm'], horizontal=True)
+        aperturemode = st.radio('**📏  Aperture**', ['mm', 'inch'], horizontal=True)
         if aperturemode == 'mm':
             aperture_size = st.number_input("..", min_value=0, max_value=3500, value=508,
                                             label_visibility='collapsed') / 25.4
@@ -545,25 +560,26 @@ with tab2:
                     unsafe_allow_html=True
                 )
 
-
         if city is not None:
             df = pd.read_csv('ExoClock_Exoplanet_Database.csv')
             filtered_df = df[df['priority'].isin(selected_priorities)]
             progress_bar = st.progress(0)
             status_text = st.empty()
 
+
             def progress_update(pct, text):
                 progress_bar.progress(pct)
                 status_text.text(text)
 
-            fig = make_timeline(startdate, enddate, city, elevation, filtered_df, alt_limit=alt_limit, moon_distance=moon_distance,
+
+            fig = make_timeline(startdate, enddate, city, elevation, filtered_df, alt_limit=alt_limit,
+                                moon_distance=moon_distance,
                                 dusk_type=dusk_type, aperture_size=aperture_size, timezone=timezone,
                                 progress_callback=progress_update)
             st.session_state['fig'] = fig
 
             progress_bar.empty()
             status_text.empty()
-
 
     if st.session_state.get('fig', None) is not None:
         fig = st.session_state['fig']

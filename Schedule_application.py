@@ -551,7 +551,7 @@ with tab2:
                                 <strong>Region/Country:</strong> {city.region}
                             </div>
                             <div>
-                                <strong>Timezone:</strong> <code>{timezone}</code><br>
+                                <strong>Timezone:</strong> {timezone}<br>
                                 <strong>Elevation:</strong> {elevation} m
                             </div>
                         </div>
@@ -559,7 +559,7 @@ with tab2:
                     """,
                     unsafe_allow_html=True
                 )
-
+#<code>{timezone}</code>
         if city is not None:
             df = pd.read_csv('ExoClock_Exoplanet_Database.csv')
             filtered_df = df[df['priority'].isin(selected_priorities)]

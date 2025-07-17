@@ -12,7 +12,7 @@ openpyxl
 astroquery
 IPython
 scipy
-timezonefinder
+timezonefinder==6.5.9
 urllib3
 plotly
 astroplan
